@@ -36,7 +36,15 @@ const Config = () => {
             toast.success("Group created successfully");
             fetchData();
         } catch (err) {
-            const message = err.response?.data?.detail || "Failed to create group";
+            let message = "Failed to create group";
+            if (err.response?.data?.detail) {
+                const detail = err.response.data.detail;
+                if (Array.isArray(detail)) {
+                    message = detail.map(d => d.msg).join(', ');
+                } else {
+                    message = detail;
+                }
+            }
             toast.error(message);
         }
     };
@@ -57,7 +65,15 @@ const Config = () => {
             toast.success("Node created successfully");
             fetchData();
         } catch (err) {
-            const message = err.response?.data?.detail || "Failed to create node";
+            let message = "Failed to create node";
+            if (err.response?.data?.detail) {
+                const detail = err.response.data.detail;
+                if (Array.isArray(detail)) {
+                    message = detail.map(d => d.msg).join(', ');
+                } else {
+                    message = detail;
+                }
+            }
             toast.error(message);
         }
     };

@@ -30,14 +30,17 @@ async def lifespan(app: FastAPI):
         logger.error(f"Startup sync failed: {e}")
     
     # Start the pinger background task
-    ping_task = asyncio.create_task(pinger.run_loop())
+    # Start the pinger background task
+    if not os.getenv("TESTING"):
+        ping_task = asyncio.create_task(pinger.run_loop())
     
     yield
     
     # Shutdown
     logger.info("BeamState Backend Stopping...")
     pinger.stop()
-    await ping_task
+    if not os.getenv("TESTING"):
+        await ping_task
 
 app = FastAPI(title="BeamState API", lifespan=lifespan)
 app.state.pinger = pinger

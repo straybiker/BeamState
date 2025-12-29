@@ -3,18 +3,12 @@ Unit tests for BeamState backend API.
 Run with: pytest test_api.py -v
 """
 import pytest
-from fastapi.testclient import TestClient
-import sys
-import os
 
-# Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
 
-from main import app
 from models import NodeCreate, NodeBase
 from pydantic import ValidationError
 
-client = TestClient(app)
+
 
 
 class TestIPValidation:
@@ -72,7 +66,7 @@ class TestIPValidation:
 class TestAPIEndpoints:
     """Test API endpoints for IP validation."""
     
-    def test_create_node_with_invalid_ip_returns_422(self):
+    def test_create_node_with_invalid_ip_returns_422(self, client):
         """Test that creating a node with invalid IP returns 422 Unprocessable Entity."""
         response = client.post(
             "/config/nodes",
@@ -81,12 +75,12 @@ class TestAPIEndpoints:
         assert response.status_code == 422, f"Expected 422, got {response.status_code}"
         assert "ip" in response.text.lower() or "validation" in response.text.lower()
     
-    def test_create_node_with_valid_ip_format(self):
+    def test_create_node_with_valid_ip_format(self, client):
         """Test that creating a node with valid IP format passes validation."""
         # This may fail with 404 if group doesn't exist, but should NOT fail with 422
         response = client.post(
             "/config/nodes",
-            json={"name": "GoodNode", "ip": "192.168.1.100", "group_id": 999}
+            json={"name": "GoodNode", "ip": "192.168.1.100", "group_id": "999"}
         )
         # Accept 404 (group not found) or 200 (success), but NOT 422 (validation error)
         assert response.status_code != 422, "Valid IP should pass validation"
@@ -95,7 +89,7 @@ class TestAPIEndpoints:
 class TestCascadeDelete:
     """Test cascade deletion of nodes when group is deleted."""
     
-    def test_group_deletion_removes_nodes(self):
+    def test_group_deletion_removes_nodes(self, client):
         """Test that deleting a group also deletes its nodes."""
         # Create a group
         group_resp = client.post(
