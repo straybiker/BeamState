@@ -43,6 +43,7 @@ services:
       - PING_TIMEOUT=2
     volumes:
       - ./backend/data:/app/data # For SQLite DB and Logs
+      - ./backend/config.json:/app/config.json # Persistence for Config Blueprint
     networks:
       - netsentry-net
 

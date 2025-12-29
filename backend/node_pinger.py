@@ -14,6 +14,7 @@ class Pinger:
         self.running = False
         self.last_ping_time: Dict[int, float] = {} # node_id -> timestamp
         self.latest_results: Dict[int, dict] = {} # node_id -> {status, latency, packet_loss, timestamp}
+        self.node_states: Dict[int, dict] = {} # node_id -> {status, failure_count, first_failure_time}
 
 
     async def ping_ip(self, ip: str, count: int = 1, timeout: int = 2):
@@ -51,27 +52,84 @@ class Pinger:
             del self.latest_results[node_id]
         if node_id in self.last_ping_time:
             del self.last_ping_time[node_id]
+        # Clear failure tracking
+        self.node_states.pop(node_id, None)
         logger.info(f"Removed node {node_id} from pinger cache")
+
+    def get_node_state(self, node_id: int) -> dict:
+        if node_id not in self.node_states:
+            self.node_states[node_id] = {
+                "status": "UP",
+                "failure_count": 0,
+                "first_failure_time": 0
+            }
+        return self.node_states[node_id]
 
     async def process_node(self, node: NodeDB):
         # Determine config (override or group default)
+        if node.group is None:
+            logger.warning(f"Node {node.name} ({node.id}) is an orphan (no group). Skipping.")
+            return
+
         interval = node.interval if node.interval is not None else node.group.interval
         packet_count = node.packet_count if node.packet_count is not None else node.group.packet_count
+        max_retries = node.max_retries if node.max_retries is not None else node.group.max_retries
         
+        # Get current state
+        state = self.get_node_state(node.id)
+        current_status = state["status"]
+        
+        # Determine effective interval based on status
+        effective_interval = interval
+        if current_status == "PENDING":
+             # Retry interval is 1/3 of heartbeat
+             effective_interval = interval / 3
+
         # Determine if due
         now = time.time()
         last = self.last_ping_time.get(node.id, 0)
         
-        if now - last >= interval:
-            logger.debug(f"Node {node.id}: Time delta {now - last:.2f}s >= Interval {interval}s. Pinging.")
+        if now - last >= effective_interval:
+            logger.debug(f"Node {node.id} ({current_status}): Time delta {now - last:.2f}s >= Interval {effective_interval:.2f}s. Pinging.")
             self.last_ping_time[node.id] = now
+            
             # Perform Ping
             logger.debug(f"Pinging {node.name} ({node.ip})...")
             latency, packet_loss = await self.ping_ip(node.ip, count=packet_count)
             
-            status = "UP" if packet_loss < 100 else "DOWN"
+            is_up = packet_loss < 100
+            new_status = current_status
             
-            logger.info(f"Result for {node.name}: {status}, Latency: {latency}ms, Loss: {packet_loss}%")
+            if is_up:
+                # Success - Reset everything
+                if current_status != "UP":
+                    logger.info(f"Node {node.name} recovered from {current_status}")
+                new_status = "UP"
+                state["failure_count"] = 0
+                state["first_failure_time"] = 0
+            else:
+                # Failure
+                if current_status == "UP":
+                    # Transition to PENDING
+                    new_status = "PENDING"
+                    state["failure_count"] = 1
+                    state["first_failure_time"] = now
+                    logger.warning(f"Node {node.name} ping failed. Entering PENDING state (Retry 1/{max_retries})")
+                elif current_status == "PENDING":
+                    state["failure_count"] += 1
+                    logger.warning(f"Node {node.name} retry failed ({state['failure_count']}/{max_retries})")
+                    if state["failure_count"] > max_retries:
+                        # Transition to DOWN
+                        new_status = "DOWN"
+                        logger.error(f"Node {node.name} exceeded max retries. Marking DOWN.")
+                elif current_status == "DOWN":
+                    # Stay DOWN
+                    new_status = "DOWN"
+            
+            # Update state status
+            state["status"] = new_status
+            
+            logger.info(f"Result for {node.name}: {new_status}, Latency: {latency}ms, Loss: {packet_loss}%")
 
             # Update In-Memory Cache for API
             self.latest_results[node.id] = {
@@ -80,21 +138,21 @@ class Pinger:
                 "ip": node.ip,
                 "group_id": node.group_id,
                 "group_name": node.group.name,
-                "status": status,
+                "status": new_status,
                 "latency": latency,
                 "packet_loss": packet_loss,
-                "timestamp": now
+                "timestamp": now,
+                "retry_count": state["failure_count"] if new_status == "PENDING" else 0
             }
             
             # Write to Storage
-
             storage.write_ping_result(
                 node_name=node.name,
                 ip=node.ip,
                 group_name=node.group.name,
                 latency=latency,
                 packet_loss=packet_loss,
-                status=status
+                status=new_status
             )
 
     async def run_loop(self):

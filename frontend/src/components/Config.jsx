@@ -47,7 +47,8 @@ const Config = () => {
             const payload = { ...newNode };
             // Clean up empty strings to null/int
             if (!payload.group_id) { toast.error("Group is required"); return; }
-            payload.group_id = parseInt(payload.group_id);
+            // payload.group_id is now a UUID string, do not parse!
+
             payload.interval = payload.interval ? parseInt(payload.interval) : null;
             payload.packet_count = payload.packet_count ? parseInt(payload.packet_count) : null;
 

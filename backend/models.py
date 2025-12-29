@@ -1,3 +1,4 @@
+import uuid
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String
@@ -10,23 +11,25 @@ Base = declarative_base()
 # SQLAlchemy Models (DB)
 class GroupDB(Base):
     __tablename__ = "groups"
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, unique=True, index=True)
     interval = Column(Integer, default=60) # Seconds between pings
     packet_count = Column(Integer, default=1) # Number of packets to send
+    max_retries = Column(Integer, default=3) # Number of retries before marking DOWN
 
     nodes = relationship("NodeDB", back_populates="group", cascade="all, delete-orphan")
 
 class NodeDB(Base):
     __tablename__ = "nodes"
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, index=True)
     ip = Column(String, index=True) # IPv4
-    group_id = Column(Integer, ForeignKey("groups.id"))
+    group_id = Column(String, ForeignKey("groups.id"))
     
     # Overrides (if null, use group default)
     interval = Column(Integer, nullable=True)
     packet_count = Column(Integer, nullable=True)
+    max_retries = Column(Integer, nullable=True)
     enabled = Column(Boolean, default=True)
 
     group = relationship("GroupDB", back_populates="nodes")
@@ -35,9 +38,10 @@ class NodeDB(Base):
 class NodeBase(BaseModel):
     name: str
     ip: str
-    group_id: Optional[int] = None
+    group_id: Optional[str] = None
     interval: Optional[int] = None
     packet_count: Optional[int] = None
+    max_retries: Optional[int] = None
     enabled: bool = True
     
     @field_validator('ip')
@@ -58,7 +62,7 @@ class NodeCreate(NodeBase):
     pass
 
 class Node(NodeBase):
-    id: int
+    id: str
     class Config:
         from_attributes = True
 
@@ -66,12 +70,15 @@ class GroupBase(BaseModel):
     name: str
     interval: int = 60
     packet_count: int = 1
+    max_retries: int = 3
 
 class GroupCreate(GroupBase):
     pass
 
 class Group(GroupBase):
-    id: int
+    id: str
     nodes: List[Node] = []
     class Config:
         from_attributes = True
+
+

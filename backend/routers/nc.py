@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List
 from database import get_db
 from models import Group, GroupCreate, GroupDB, Node, NodeCreate, NodeDB
+from utils import save_config
+import uuid
 
 import logging
 logger = logging.getLogger("NetSentry.Config")
@@ -21,14 +23,23 @@ def create_group(group: GroupCreate, db: Session = Depends(get_db)):
     db_group = db.query(GroupDB).filter(GroupDB.name == group.name).first()
     if db_group:
         raise HTTPException(status_code=400, detail="Group already exists")
-    new_group = GroupDB(**group.dict())
+    
+    # Generate explicit UUID if not provided by DB default? 
+    # Actually DB default will handle it, but for persistence efficiency might differ 
+    # But relying on DB default is fine.
+    
+    new_group = GroupDB(**group.model_dump())
     db.add(new_group)
     db.commit()
     db.refresh(new_group)
+    
+    # Sync to config.json
+    save_config(db)
+    
     return new_group
 
 @router.delete("/groups/{group_id}")
-def delete_group(group_id: int, request: Request, db: Session = Depends(get_db)):
+def delete_group(group_id: str, request: Request, db: Session = Depends(get_db)):
     group = db.query(GroupDB).filter(GroupDB.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -43,6 +54,10 @@ def delete_group(group_id: int, request: Request, db: Session = Depends(get_db))
         
     db.delete(group)
     db.commit()
+    
+    # Sync to config.json
+    save_config(db)
+    
     return {"ok": True}
 
 # --- NODES ---
@@ -61,29 +76,37 @@ def create_node(node: NodeCreate, db: Session = Depends(get_db)):
         if not group:
              raise HTTPException(status_code=404, detail="Group not found")
              
-    new_node = NodeDB(**node.dict())
+    new_node = NodeDB(**node.model_dump())
     db.add(new_node)
     db.commit()
     db.refresh(new_node)
+    
+    # Sync to config.json
+    save_config(db)
+    
     return new_node
 
 @router.put("/nodes/{node_id}", response_model=Node)
-def update_node(node_id: int, node: NodeCreate, db: Session = Depends(get_db)):
+def update_node(node_id: str, node: NodeCreate, db: Session = Depends(get_db)):
     db_node = db.query(NodeDB).filter(NodeDB.id == node_id).first()
     if not db_node:
         raise HTTPException(status_code=404, detail="Node not found")
     
-    for key, value in node.dict().items():
+    for key, value in node.model_dump().items():
         setattr(db_node, key, value)
     
     db.commit()
     db.refresh(db_node)
+    
+    # Sync to config.json
+    save_config(db)
+    
     return db_node
 
 
 
 @router.delete("/nodes/{node_id}")
-def delete_node(node_id: int, request: Request, db: Session = Depends(get_db)):
+def delete_node(node_id: str, request: Request, db: Session = Depends(get_db)):
     db_node = db.query(NodeDB).filter(NodeDB.id == node_id).first()
     if not db_node:
         raise HTTPException(status_code=404, detail="Node not found")
@@ -91,6 +114,9 @@ def delete_node(node_id: int, request: Request, db: Session = Depends(get_db)):
     # Remove from DB
     db.delete(db_node)
     db.commit()
+    
+    # Sync to config.json
+    save_config(db)
     
     # Remove from Pinger Cache immediately
     if hasattr(request.app.state, "pinger"):

@@ -20,6 +20,21 @@ A real-time network monitoring application that pings configured nodes and displ
 - **Database**: SQLite (local), InfluxDB (optional for metrics)
 - **Deployment**: Docker Compose
 
+## Architecture & Persistence
+
+NetSentry uses a **Hybrid Storage Strategy** to balance speed and usability:
+
+1.  **`backend/data/netsentry.db` (The Engine)**:
+    - A high-performance **Runtime Cache** using SQLite.
+    - Used by the Pinger and API for fast, concurrent access and complex relationship queries.
+    - Functions as the application's reliable "RAM".
+
+2.  **`backend/config.json` (The Blueprint)**:
+    - The **Human-Readable Source of Truth**.
+    - All configuration changes made in the UI are immediately synced here.
+    - Ensures **Persistence** and **Portability**: If the database is deleted or corrupted, the system rebuilds itself entirely from this file on startup.
+    - You can back up or share this file to preserve your network topology.
+
 ## Quick Start
 
 ### Prerequisites
@@ -194,6 +209,14 @@ Manage groups and nodes with sortable tables.
 ## License
 
 MIT License - feel free to use and modify.
+
+## Roadmap / Todo
+
+- [ ] InfluxDB integration
+- [ ] Pushover integration
+- [ ] SNMP support
+- [ ] Start/Pause functionality for Groups and Nodes
+- [ ] Configurable retry policies
 
 ## Contributing
 

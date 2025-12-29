@@ -36,13 +36,19 @@ def sync_with_config(db: Session):
     for g_data in config_data.get("groups", []):
         group_id = g_data.get("id")
         if group_id is None:
-            logger.error(f"Group {g_data.get('name')} missing ID. Skipping.")
-            continue
+            # If no ID in config, we can't sync it properly blindly.
+            # But the requirement was unique IDs not followup numbers.
+            # Assuming config.json is SSOT, it MUST have IDs.
+            # If not, create one?
+            import uuid
+            group_id = str(uuid.uuid4())
+            g_data["id"] = group_id
+            logger.warning(f"Group {g_data.get('name')} missing ID. Generated: {group_id}")
 
         group = db.query(GroupDB).filter(GroupDB.id == group_id).first()
         if not group:
             logger.info(f"Creating group: {g_data['name']} (ID: {group_id})")
-            group = GroupDB(id=group_id, name=g_data["name"])
+            group = GroupDB(id=group_id, name=g_data["name"], max_retries=g_data.get("max_retries", 3))
             db.add(group)
         else:
             group.name = g_data["name"]
@@ -50,6 +56,7 @@ def sync_with_config(db: Session):
         # Update Group fields
         group.interval = g_data.get("interval", 60)
         group.packet_count = g_data.get("packet_count", 1)
+        group.max_retries = g_data.get("max_retries", 3)
         valid_group_ids.append(group_id)
         db.flush() # Ensure group exists for FKs
 
@@ -57,8 +64,10 @@ def sync_with_config(db: Session):
         for n_data in g_data.get("nodes", []):
             node_id = n_data.get("id")
             if node_id is None:
-                logger.error(f"Node {n_data.get('name')} missing ID. Skipping.")
-                continue
+                import uuid
+                node_id = str(uuid.uuid4())
+                n_data["id"] = node_id
+                logger.warning(f"Node {n_data.get('name')} missing ID. Generated: {node_id}")
 
             node = db.query(NodeDB).filter(NodeDB.id == node_id).first()
             if not node:

@@ -38,7 +38,9 @@ class Storage:
         packet_loss: 0-100%
         status: UP / DOWN
         """
-        timestamp = datetime.utcnow()
+        # Explicit format to ensure local time is clear
+        timestamp = datetime.now()
+        timestamp_str = timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")
         
         if self.use_influx:
             try:
@@ -60,7 +62,7 @@ class Storage:
         
         # Fallback or Default to File
         entry = {
-            "timestamp": timestamp.isoformat(),
+            "timestamp": timestamp_str,
             "node": node_name,
             "ip": ip,
             "group": group_name,
