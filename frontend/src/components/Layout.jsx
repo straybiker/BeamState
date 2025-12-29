@@ -15,7 +15,7 @@ const Layout = ({ children }) => {
             {/* Sidebar / Mobile Header */}
             <nav className="bg-surface p-4 md:w-64 md:h-screen flex md:flex-col justify-between items-center md:items-stretch border-r border-slate-700 shadow-lg z-10">
                 <div className="flex items-center space-x-2 mb-0 md:mb-8">
-                    <img src="/logo.png" alt="Logo" className="h-10 w-10 object-contain" />
+                    <img src="/logo_transparant.png" alt="Logo" className="h-10 object-contain" />
                     <h1 className="text-xl font-bold tracking-wider text-primary">BeamState</h1>
                 </div>
 
