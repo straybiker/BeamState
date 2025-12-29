@@ -32,7 +32,7 @@ class TestIPValidation:
             "255.255.255.255",
         ]
         for ip in valid_ips:
-            node = NodeCreate(name="test", ip=ip, group_id=1)
+            node = NodeCreate(name="test", ip=ip, group_id="1")
             assert node.ip == ip, f"Valid IP {ip} should be accepted"
     
     def test_invalid_ip_octets_too_high(self):
@@ -47,7 +47,7 @@ class TestIPValidation:
         ]
         for ip in invalid_ips:
             with pytest.raises(ValidationError) as exc_info:
-                NodeCreate(name="test", ip=ip, group_id=1)
+                NodeCreate(name="test", ip=ip, group_id="1")
             assert "IP address" in str(exc_info.value), f"Invalid IP {ip} should be rejected"
     
     def test_invalid_ip_format(self):
@@ -65,7 +65,7 @@ class TestIPValidation:
         ]
         for ip in invalid_formats:
             with pytest.raises(ValidationError) as exc_info:
-                NodeCreate(name="test", ip=ip, group_id=1)
+                NodeCreate(name="test", ip=ip, group_id="1")
             assert "ip" in str(exc_info.value).lower(), f"Invalid format {ip} should be rejected"
 
 

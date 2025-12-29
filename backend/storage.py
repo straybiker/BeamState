@@ -1,10 +1,11 @@
 import os
 import json
 import logging
-import time
+import asyncio
 from datetime import datetime
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
+import aiofiles
 
 logger = logging.getLogger("BeamState.Storage")
 
@@ -14,6 +15,7 @@ class Storage:
         self.influx_client = None
         self.write_api = None
         self.log_file = os.getenv("LOG_FILE", "backend/data/ping_logs.json")
+        self._write_lock = asyncio.Lock()
         
         # Influx Config
         self.url = os.getenv("INFLUXDB_URL")
@@ -32,11 +34,11 @@ class Storage:
         else:
             logger.info("InfluxDB not configured. Using file logging.")
 
-    def write_ping_result(self, node_name: str, ip: str, group_name: str, latency: float, packet_loss: float, status: str):
+    async def write_ping_result(self, node_name: str, ip: str, group_name: str, latency: float, packet_loss: float, status: str):
         """
         latency: ms
         packet_loss: 0-100%
-        status: UP / DOWN
+        status: UP / DOWN / PENDING
         """
         # Explicit format to ensure local time is clear
         timestamp = datetime.now()
@@ -60,7 +62,7 @@ class Storage:
             except Exception as e:
                 logger.error(f"Error writing to InfluxDB: {e}")
         
-        # Fallback or Default to File
+        # Fallback or Default to File (async)
         entry = {
             "timestamp": timestamp_str,
             "node": node_name,
@@ -72,25 +74,27 @@ class Storage:
         }
         
         try:
-            # Simple append to file with rotation
-            with open(self.log_file, "a") as f:
-                f.write(json.dumps(entry) + "\n")
-            
-            # Log rotation: keep only last 200 lines
-            self._rotate_log()
+            async with self._write_lock:
+                # Async append to file
+                async with aiofiles.open(self.log_file, "a") as f:
+                    await f.write(json.dumps(entry) + "\n")
+                
+                # Log rotation: keep only last 200 lines
+                await self._rotate_log()
         except Exception as e:
             logger.error(f"Error writing to log file: {e}")
     
-    def _rotate_log(self, max_lines: int = 200):
+    async def _rotate_log(self, max_lines: int = 200):
         """Keep only the last max_lines entries in the log file."""
         try:
-            with open(self.log_file, "r") as f:
-                lines = f.readlines()
+            async with aiofiles.open(self.log_file, "r") as f:
+                content = await f.read()
+                lines = content.splitlines(keepends=True)
             
             if len(lines) > max_lines:
                 # Keep only the last max_lines
-                with open(self.log_file, "w") as f:
-                    f.writelines(lines[-max_lines:])
+                async with aiofiles.open(self.log_file, "w") as f:
+                    await f.writelines(lines[-max_lines:])
         except Exception as e:
             logger.debug(f"Log rotation skipped: {e}")
 

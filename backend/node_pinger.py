@@ -145,8 +145,8 @@ class Pinger:
                 "retry_count": state["failure_count"] if new_status == "PENDING" else 0
             }
             
-            # Write to Storage
-            storage.write_ping_result(
+            # Write to Storage (async)
+            await storage.write_ping_result(
                 node_name=node.name,
                 ip=node.ip,
                 group_name=node.group.name,

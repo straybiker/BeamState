@@ -1,8 +1,9 @@
 fastapi
 uvicorn
 influxdb-client
-aioping
+ping3
 pydantic
 sqlalchemy
 python-multipart
 python-dotenv
+aiofiles

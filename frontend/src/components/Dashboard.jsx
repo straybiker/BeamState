@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api';
 import { Wifi, WifiOff, Clock, Activity } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const Dashboard = () => {
     const [statusData, setStatusData] = useState([]);
@@ -20,6 +21,7 @@ const Dashboard = () => {
             }
         } catch (error) {
             console.error("Failed to fetch data:", error);
+            toast.error('Failed to load dashboard data');
         } finally {
             setLoading(false);
         }
@@ -31,7 +33,10 @@ const Dashboard = () => {
             if (statusRes.data && statusRes.data.latest_results) {
                 setStatusData(statusRes.data.latest_results);
             }
-        } catch (error) { console.error("Poll error:", error); }
+        } catch (error) {
+            console.error("Poll error:", error);
+            // Silent fail for polling - don't spam user with toasts
+        }
     };
 
     useEffect(() => {

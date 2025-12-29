@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from database import init_db, SessionLocal
 from node_pinger import Pinger
-from routers import nc as config
+from routers import config
 from cleanup import sync_with_config
 
 # Setup Logging
@@ -53,14 +53,10 @@ app.add_middleware(
 )
 
 # Include Routers
-logger.warning(f"DEBUG: IMPORTED CONFIG FROM {config.__file__}")
 app.include_router(config.router)
 
 
-@app.on_event("startup")
-async def startup_event():
-    for route in app.routes:
-        logger.warning(f"ROUTE: {route.path} -> {route.name} ({route.endpoint})")
+
 
 @app.get("/")
 def read_root():
