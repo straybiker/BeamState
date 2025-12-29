@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # InfluxDB v2 Service (Optional if using remote)
+  influxdb:
+    image: influxdb:2.7
+    container_name: netsentry-influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword
+      - DOCKER_INFLUXDB_INIT_ORG=netsentry_org
+      - DOCKER_INFLUXDB_INIT_BUCKET=netsentry_bucket
+    networks:
+      - netsentry-net
+    healthcheck:
+      test: "curl -f http://localhost:8086/health || exit 1"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Backend Service (FastAPI)
+  backend:
+    build: ./backend
+    container_name: netsentry-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # InfluxDB Configuration (Defaults point to local container)
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=my-super-secret-auth-token
+      - INFLUXDB_ORG=netsentry_org
+      - INFLUXDB_BUCKET=netsentry_bucket
+      # Ping Configuration
+      - PING_INTERVAL=60
+      - PING_COUNT=1
+      - PING_TIMEOUT=2
+    volumes:
+      - ./backend/data:/app/data # For SQLite DB and Logs
+    networks:
+      - netsentry-net
+
+  # Frontend Service (React/Nginx)
+  frontend:
+    build: ./frontend
+    container_name: netsentry-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - netsentry-net
+
+networks:
+  netsentry-net:
+    driver: bridge
+
+volumes:
+  influxdb-data:
+  influxdb-config:

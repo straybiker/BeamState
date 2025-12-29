@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+influxdb-client
+aioping
+pydantic
+sqlalchemy
+python-multipart
+python-dotenv
