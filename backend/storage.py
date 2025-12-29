@@ -34,11 +34,12 @@ class Storage:
         else:
             logger.info("InfluxDB not configured. Using file logging.")
 
-    async def write_ping_result(self, node_name: str, ip: str, group_name: str, latency: float, packet_loss: float, status: str):
+    async def write_ping_result(self, node_name: str, ip: str, group_name: str, latency: float, packet_loss: float, status: str, raw_responses: list = None):
         """
         latency: ms
         packet_loss: 0-100%
-        status: UP / DOWN / PENDING
+        status: UP / DOWN / PENDING / PAUSED
+        raw_responses: list of raw ping3 return values
         """
         # Explicit format to ensure local time is clear
         timestamp = datetime.now()
@@ -46,15 +47,31 @@ class Storage:
         
         if self.use_influx:
             try:
+                # Format raw responses for InfluxDB
+                response_str = ""
+                if raw_responses:
+                    formatted = []
+                    for resp in raw_responses:
+                        if isinstance(resp, float):
+                            formatted.append(f"{round(resp * 1000, 2)}ms")
+                        elif resp is None:
+                            formatted.append("timeout")
+                        elif resp is False:
+                            formatted.append("error")
+                        else:
+                            formatted.append(str(resp))
+                    response_str = ",".join(formatted)
+                
                 point = (
                     Point("ping")
                     .tag("node", node_name)
                     .tag("ip", ip)
                     .tag("group", group_name)
+                    .tag("status", status)
                     .field("latency", float(latency) if latency is not None else 0.0)
                     .field("packet_loss", float(packet_loss))
                     .field("status_code", 1 if status == "UP" else 0)
-                    .field("status", status)
+                    .field("ping_responses", response_str if response_str else "none")
                     .time(timestamp)
                 )
                 self.write_api.write(bucket=self.bucket, org=self.org, record=point)
@@ -63,14 +80,28 @@ class Storage:
                 logger.error(f"Error writing to InfluxDB: {e}")
         
         # Fallback or Default to File (async)
+        # Format raw responses for JSON serialization
+        formatted_responses = []
+        if raw_responses:
+            for resp in raw_responses:
+                if isinstance(resp, float):
+                    formatted_responses.append(round(resp * 1000, 2))  # Convert to ms
+                elif resp is None:
+                    formatted_responses.append("timeout")
+                elif resp is False:
+                    formatted_responses.append("error")
+                else:
+                    formatted_responses.append(str(resp))
+        
         entry = {
             "timestamp": timestamp_str,
             "node": node_name,
             "ip": ip,
             "group": group_name,
-            "latency": latency,
+            "latency": round(latency, 2) if latency is not None else None,
             "packet_loss": packet_loss,
-            "status": status
+            "status": status,
+            "ping_responses": formatted_responses if formatted_responses else None
         }
         
         try:

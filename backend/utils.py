@@ -26,6 +26,7 @@ def save_config(db: Session):
                 "interval": group.interval,
                 "packet_count": group.packet_count,
                 "max_retries": group.max_retries,
+                "enabled": group.enabled,
                 "nodes": []
             }
             

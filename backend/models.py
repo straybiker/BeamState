@@ -15,7 +15,8 @@ class GroupDB(Base):
     name = Column(String, unique=True, index=True)
     interval = Column(Integer, default=60) # Seconds between pings
     packet_count = Column(Integer, default=1) # Number of packets to send
-    max_retries = Column(Integer, default=3) # Number of retries before marking DOWN
+    max_retries = Column(Integer, default=4) # Number of retries before marking DOWN
+    enabled = Column(Boolean, default=True)
 
     nodes = relationship("NodeDB", back_populates="group", cascade="all, delete-orphan")
 
@@ -70,7 +71,8 @@ class GroupBase(BaseModel):
     name: str
     interval: int = 60
     packet_count: int = 1
-    max_retries: int = 3
+    max_retries: int = 4
+    enabled: bool = True
 
 class GroupCreate(GroupBase):
     pass

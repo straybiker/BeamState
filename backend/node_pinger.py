@@ -19,33 +19,39 @@ class Pinger:
 
     async def ping_ip(self, ip: str, count: int = 1, timeout: int = 2):
         """
-        Returns (avg_latency_ms, packet_loss_percent)
+        Returns (avg_latency_ms, packet_loss_percent, raw_responses)
         Uses ping3 which works without admin privileges on Windows.
+        raw_responses: list of raw ping3 return values for logging
         """
         success_count = 0
         total_latency = 0.0
+        raw_responses = []
         
         for _ in range(count):
             try:
-                # ping3.ping returns latency in seconds, or None on failure
+                # ping3.ping returns latency in seconds, None on timeout, or False on error
                 latency_sec = ping(ip, timeout=timeout)
-                if latency_sec is not None:
+                raw_responses.append(latency_sec)
+                if latency_sec is not None and latency_sec is not False:
                     total_latency += latency_sec * 1000  # to ms
                     success_count += 1
+                else:
+                    logger.debug(f"Ping returned {latency_sec} for {ip}")
             except Exception as e:
                 logger.debug(f"Ping error for {ip}: {e}")
+                raw_responses.append(f"Exception: {str(e)}")
             
             # Small delay between packets if count > 1
             if count > 1:
                 await asyncio.sleep(0.5)
 
         if success_count == 0:
-            return None, 100.0  # No response, 100% loss
+            return None, 100.0, raw_responses  # No response, 100% loss
         
         avg_latency = total_latency / success_count
         packet_loss = ((count - success_count) / count) * 100.0
         
-        return avg_latency, packet_loss
+        return avg_latency, packet_loss, raw_responses
 
     def remove_node(self, node_id: int):
         if node_id in self.latest_results:
@@ -69,6 +75,26 @@ class Pinger:
         # Determine config (override or group default)
         if node.group is None:
             logger.warning(f"Node {node.name} ({node.id}) is an orphan (no group). Skipping.")
+            return
+
+        if not node.enabled or not node.group.enabled:
+            # Handle PAUSED state
+            new_status = "PAUSED"
+            
+            # Update cache directly
+            self.latest_results[node.id] = {
+                "node_id": node.id,
+                "node_name": node.name,
+                "ip": node.ip,
+                "group_id": node.group_id,
+                "group_name": node.group.name,
+                "status": new_status,
+                "latency": 0,
+                "packet_loss": 0,
+                "timestamp": time.time(),
+                "retry_count": 0
+            }
+            # Skip actual ping
             return
 
         interval = node.interval if node.interval is not None else node.group.interval
@@ -95,7 +121,8 @@ class Pinger:
             
             # Perform Ping
             logger.debug(f"Pinging {node.name} ({node.ip})...")
-            latency, packet_loss = await self.ping_ip(node.ip, count=packet_count)
+            # User requested 5000ms timeout
+            latency, packet_loss, raw_responses = await self.ping_ip(node.ip, count=packet_count, timeout=5)
             
             is_up = packet_loss < 100
             new_status = current_status
@@ -129,7 +156,8 @@ class Pinger:
             # Update state status
             state["status"] = new_status
             
-            logger.info(f"Result for {node.name}: {new_status}, Latency: {latency}ms, Loss: {packet_loss}%")
+            lat_str = f"{latency:.2f}ms" if latency is not None else "N/A"
+            logger.info(f"Result for {node.name}: {new_status}, Latency: {lat_str}, Loss: {packet_loss}%")
 
             # Update In-Memory Cache for API
             self.latest_results[node.id] = {
@@ -152,7 +180,8 @@ class Pinger:
                 group_name=node.group.name,
                 latency=latency,
                 packet_loss=packet_loss,
-                status=new_status
+                status=new_status,
+                raw_responses=raw_responses
             )
 
     async def run_loop(self):
@@ -162,7 +191,7 @@ class Pinger:
         while self.running:
             db = SessionLocal()
             try:
-                nodes = db.query(NodeDB).filter(NodeDB.enabled == True).all()
+                nodes = db.query(NodeDB).all()
                 # Process concurrently or sequentially?
                 # Sequentially safer for simple loop, async allows some concurrency.
                 # Let's create tasks for each node to parallelize a bit within this cycle

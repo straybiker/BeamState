@@ -56,7 +56,8 @@ def sync_with_config(db: Session):
         # Update Group fields
         group.interval = g_data.get("interval", 60)
         group.packet_count = g_data.get("packet_count", 1)
-        group.max_retries = g_data.get("max_retries", 3)
+        group.max_retries = g_data.get("max_retries", 4)
+        group.enabled = g_data.get("enabled", True)
         valid_group_ids.append(group_id)
         db.flush() # Ensure group exists for FKs
 

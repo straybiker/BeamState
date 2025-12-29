@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api';
-import { Plus, Trash2, ArrowUpDown } from 'lucide-react';
+import { Plus, Trash2, ArrowUpDown, Play, Pause } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const Config = () => {
@@ -97,6 +97,31 @@ const Config = () => {
             fetchData();
         } catch (e) {
             toast.error("Failed to delete group");
+        }
+    };
+
+    const handleToggleGroup = async (group) => {
+        try {
+            // Optimistic update or wait? Wait is safer.
+            const newEnabled = group.enabled === false ? true : false;
+            await api.put(`/config/groups/${group.id}`, { ...group, enabled: newEnabled });
+            toast.success(`Group ${newEnabled ? 'started' : 'paused'}`);
+            fetchData();
+        } catch (e) {
+            console.error(e);
+            toast.error("Failed to update group status");
+        }
+    };
+
+    const handleToggleNode = async (node) => {
+        try {
+            const newEnabled = node.enabled === false ? true : false;
+            await api.put(`/config/nodes/${node.id}`, { ...node, enabled: newEnabled });
+            toast.success(`Node ${newEnabled ? 'started' : 'paused'}`);
+            fetchData();
+        } catch (e) {
+            console.error(e);
+            toast.error("Failed to update node status");
         }
     };
 
@@ -252,6 +277,9 @@ const Config = () => {
                                         <td className="px-4 py-3 font-medium">{g.name}</td>
                                         <td className="px-4 py-3">{g.interval}s</td>
                                         <td className="px-4 py-3 text-right">
+                                            <button onClick={() => handleToggleGroup(g)} className="bg-slate-700/50 hover:bg-slate-700 p-1 rounded transition-colors mr-2" title={g.enabled === false ? "Start Group" : "Pause Group"}>
+                                                {g.enabled === false ? <Play size={18} className="text-green-400" /> : <Pause size={18} className="text-orange-400" />}
+                                            </button>
                                             <button onClick={() => handleDeleteGroup(g.id)} className="text-red-400 hover:text-red-300 p-1 rounded transition-colors"><Trash2 size={18} /></button>
                                         </td>
                                     </tr>
@@ -351,6 +379,9 @@ const Config = () => {
                                                 )}
                                             </td>
                                             <td className="px-4 py-3 text-right">
+                                                <button onClick={() => handleToggleNode(n)} className="bg-slate-700/50 hover:bg-slate-700 p-1 rounded transition-colors mr-2" title={n.enabled === false ? "Start Node" : "Pause Node"}>
+                                                    {n.enabled === false ? <Play size={18} className="text-green-400" /> : <Pause size={18} className="text-orange-400" />}
+                                                </button>
                                                 <button onClick={() => handleDeleteNode(n.id)} className="text-red-400 hover:text-red-300 p-1 rounded transition-colors"><Trash2 size={18} /></button>
                                             </td>
                                         </tr>

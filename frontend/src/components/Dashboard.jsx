@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api';
-import { Wifi, WifiOff, Clock, Activity } from 'lucide-react';
+import { Wifi, WifiOff, Clock, Activity, PauseCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const Dashboard = () => {
@@ -79,9 +79,12 @@ const Dashboard = () => {
                 const configNodeCount = group.nodes ? group.nodes.length : 0;
 
                 return (
-                    <div key={group.id} className="bg-surface rounded-xl p-6 border border-slate-700 shadow-sm">
-                        <h3 className="text-xl font-semibold mb-4 text-primary border-b border-slate-700 pb-2 flex justify-between items-center">
-                            <span>{group.name}</span>
+                    <div key={group.id} className={`rounded-xl p-6 border shadow-sm transition-colors ${group.enabled === false ? 'bg-slate-900 border-slate-800 opacity-60' : 'bg-surface border-slate-700'}`}>
+                        <h3 className={`text-xl font-semibold mb-4 border-b pb-2 flex justify-between items-center ${group.enabled === false ? 'text-slate-500 border-slate-800' : 'text-primary border-slate-700'}`}>
+                            <div className="flex items-center">
+                                {group.enabled === false && <PauseCircle size={20} className="mr-2" />}
+                                <span>{group.enabled === false ? `${group.name} - PAUSED` : group.name}</span>
+                            </div>
                             <span className="text-xs text-slate-500 font-normal">{configNodeCount} nodes</span>
                         </h3>
 
@@ -94,6 +97,7 @@ const Dashboard = () => {
                                 {groupNodes.map((node) => {
                                     const isUp = node.status === 'UP';
                                     const isPending = node.status === 'PENDING';
+                                    const isPaused = node.status === 'PAUSED';
 
                                     let statusColor = 'text-red-400';
                                     let bgColor = 'bg-red-500/20';
@@ -107,6 +111,10 @@ const Dashboard = () => {
                                         statusColor = 'text-orange-400';
                                         bgColor = 'bg-orange-500/20';
                                         icon = <Clock size={20} />;
+                                    } else if (isPaused) {
+                                        statusColor = 'text-slate-500';
+                                        bgColor = 'bg-slate-700/30';
+                                        icon = <PauseCircle size={20} />;
                                     }
 
                                     return (
