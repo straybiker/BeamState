@@ -1,4 +1,4 @@
-# Run NetSentry Locally
+# Run BeamState Locally
 
 # 1. Install Backend Deps
 Write-Host "Installing Backend Dependencies..."

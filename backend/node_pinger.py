@@ -7,7 +7,7 @@ from database import SessionLocal
 from models import NodeDB, GroupDB
 from storage import storage
 
-logger = logging.getLogger("NetSentry.Pinger")
+logger = logging.getLogger("BeamState.Pinger")
 
 class Pinger:
     def __init__(self):

@@ -1,8 +1,8 @@
-# NetSentry
+# BeamState
 
 A real-time network monitoring application that pings configured nodes and displays their status on a beautiful dashboard.
 
-![NetSentry Dashboard](frontend/public/logo.png)
+![BeamState Dashboard](frontend/public/logo.png)
 
 ## Features
 
@@ -22,9 +22,9 @@ A real-time network monitoring application that pings configured nodes and displ
 
 ## Architecture & Persistence
 
-NetSentry uses a **Hybrid Storage Strategy** to balance speed and usability:
+BeamState uses a **Hybrid Storage Strategy** to balance speed and usability:
 
-1.  **`backend/data/netsentry.db` (The Engine)**:
+1.  **`backend/data/beamstate.db` (The Engine)**:
     - A high-performance **Runtime Cache** using SQLite.
     - Used by the Pinger and API for fast, concurrent access and complex relationship queries.
     - Functions as the application's reliable "RAM".
@@ -47,8 +47,8 @@ NetSentry uses a **Hybrid Storage Strategy** to balance speed and usability:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/NetSentry.git
-   cd NetSentry
+   git clone https://github.com/yourusername/BeamState.git
+   cd BeamState
    ```
 
 2. **Start the Backend**
@@ -125,7 +125,7 @@ Define your network topology in `backend/config.json`. The database syncs with t
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_PATH` | `backend/data/netsentry.db` | SQLite database path |
+| `DB_PATH` | `backend/data/beamstate.db` | SQLite database path |
 | `LOG_FILE` | `backend/data/ping_logs.json` | JSON log file path |
 | `INFLUXDB_URL` | - | InfluxDB URL (enables InfluxDB logging) |
 | `INFLUXDB_TOKEN` | - | InfluxDB authentication token |
@@ -151,7 +151,7 @@ Full API documentation available at `/docs` when running the backend.
 ## Project Structure
 
 ```
-NetSentry/
+BeamState/
 ├── backend/
 │   ├── main.py           # FastAPI app entry point
 │   ├── node_pinger.py    # Async ping loop
@@ -163,7 +163,7 @@ NetSentry/
 │   ├── routers/
 │   │   └── config.py     # CRUD API routes
 │   ├── data/
-│   │   ├── netsentry.db  # SQLite database
+│   │   ├── beamstate.db  # SQLite database
 │   │   └── ping_logs.json # JSON ping logs
 │   ├── Dockerfile
 │   └── requirements.txt
@@ -210,13 +210,6 @@ Manage groups and nodes with sortable tables.
 
 MIT License - feel free to use and modify.
 
-## Roadmap / Todo
-
-- [ ] InfluxDB integration
-- [ ] Pushover integration
-- [ ] SNMP support
-- [ ] Start/Pause functionality for Groups and Nodes
-- [ ] Configurable retry policies
 
 ## Contributing
 

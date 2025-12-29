@@ -4,7 +4,7 @@ import logging
 from sqlalchemy.orm import Session
 from models import GroupDB, NodeDB
 
-logger = logging.getLogger("NetSentry.Utils")
+logger = logging.getLogger("BeamState.Utils")
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 

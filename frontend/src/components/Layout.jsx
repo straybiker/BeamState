@@ -16,7 +16,7 @@ const Layout = ({ children }) => {
             <nav className="bg-surface p-4 md:w-64 md:h-screen flex md:flex-col justify-between items-center md:items-stretch border-r border-slate-700 shadow-lg z-10">
                 <div className="flex items-center space-x-2 mb-0 md:mb-8">
                     <img src="/logo.png" alt="Logo" className="h-10 w-10 object-contain" />
-                    <h1 className="text-xl font-bold tracking-wider text-primary">NetSentry</h1>
+                    <h1 className="text-xl font-bold tracking-wider text-primary">BeamState</h1>
                 </div>
 
                 <div className="flex md:flex-col space-x-4 md:space-x-0 md:space-y-2">

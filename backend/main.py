@@ -10,7 +10,7 @@ from cleanup import sync_with_config
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("NetSentry")
+logger = logging.getLogger("BeamState")
 
 # Initialize Pinger
 pinger = Pinger()
@@ -18,7 +18,7 @@ pinger = Pinger()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("NetSentry Backend Starting...")
+    logger.info("BeamState Backend Starting...")
     init_db()
     
     # Run Startup Cleanup & Sync
@@ -35,11 +35,11 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    logger.info("NetSentry Backend Stopping...")
+    logger.info("BeamState Backend Stopping...")
     pinger.stop()
     await ping_task
 
-app = FastAPI(title="NetSentry API", lifespan=lifespan)
+app = FastAPI(title="BeamState API", lifespan=lifespan)
 app.state.pinger = pinger
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,7 +64,7 @@ async def startup_event():
 
 @app.get("/")
 def read_root():
-    return {"status": "online", "service": "NetSentry"}
+    return {"status": "online", "service": "BeamState"}
 
 @app.get("/status")
 def get_pinger_status():

@@ -7,7 +7,7 @@ from utils import save_config
 import uuid
 
 import logging
-logger = logging.getLogger("NetSentry.Config")
+logger = logging.getLogger("BeamState.Config")
 
 router = APIRouter(prefix="/config", tags=["configuration"])
 

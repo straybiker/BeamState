@@ -1,5 +1,5 @@
 """
-Unit tests for NetSentry backend API.
+Unit tests for BeamState backend API.
 Run with: pytest test_api.py -v
 """
 import pytest

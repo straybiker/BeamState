@@ -4,7 +4,7 @@ services:
   # InfluxDB v2 Service (Optional if using remote)
   influxdb:
     image: influxdb:2.7
-    container_name: netsentry-influxdb
+    container_name: beamstate-influxdb
     ports:
       - "8086:8086"
     volumes:
@@ -14,10 +14,10 @@ services:
       - DOCKER_INFLUXDB_INIT_MODE=setup
       - DOCKER_INFLUXDB_INIT_USERNAME=admin
       - DOCKER_INFLUXDB_INIT_PASSWORD=adminpassword
-      - DOCKER_INFLUXDB_INIT_ORG=netsentry_org
-      - DOCKER_INFLUXDB_INIT_BUCKET=netsentry_bucket
+      - DOCKER_INFLUXDB_INIT_ORG=beamstate_org
+      - DOCKER_INFLUXDB_INIT_BUCKET=beamstate_bucket
     networks:
-      - netsentry-net
+      - beamstate-net
     healthcheck:
       test: "curl -f http://localhost:8086/health || exit 1"
       interval: 30s
@@ -27,7 +27,7 @@ services:
   # Backend Service (FastAPI)
   backend:
     build: ./backend
-    container_name: netsentry-backend
+    container_name: beamstate-backend
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -35,8 +35,8 @@ services:
       # InfluxDB Configuration (Defaults point to local container)
       - INFLUXDB_URL=http://influxdb:8086
       - INFLUXDB_TOKEN=my-super-secret-auth-token
-      - INFLUXDB_ORG=netsentry_org
-      - INFLUXDB_BUCKET=netsentry_bucket
+      - INFLUXDB_ORG=beamstate_org
+      - INFLUXDB_BUCKET=beamstate_bucket
       # Ping Configuration
       - PING_INTERVAL=60
       - PING_COUNT=1
@@ -45,22 +45,22 @@ services:
       - ./backend/data:/app/data # For SQLite DB and Logs
       - ./backend/config.json:/app/config.json # Persistence for Config Blueprint
     networks:
-      - netsentry-net
+      - beamstate-net
 
   # Frontend Service (React/Nginx)
   frontend:
     build: ./frontend
-    container_name: netsentry-frontend
+    container_name: beamstate-frontend
     restart: unless-stopped
     ports:
       - "3000:80"
     depends_on:
       - backend
     networks:
-      - netsentry-net
+      - beamstate-net
 
 networks:
-  netsentry-net:
+  beamstate-net:
     driver: bridge
 
 volumes:
