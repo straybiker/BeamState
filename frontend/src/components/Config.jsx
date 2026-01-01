@@ -28,6 +28,7 @@ const Config = () => {
         snmp_community: '',
         snmp_port: ''
     });
+    const [editingNode, setEditingNode] = useState(null); // Track which node is being edited
 
     const fetchData = async () => {
         try {
@@ -72,20 +73,35 @@ const Config = () => {
         }
     };
 
-    const handleCreateNode = async (e) => {
+    const handleCreateOrUpdateNode = async (e) => {
         e.preventDefault();
         try {
             const payload = { ...newNode };
             // Clean up empty strings to null/int
             if (!payload.group_id) { toast.error("Group is required"); return; }
-            // payload.group_id is now a UUID string, do not parse!
 
             payload.interval = payload.interval ? parseInt(payload.interval) : null;
             payload.packet_count = payload.packet_count ? parseInt(payload.packet_count) : null;
             payload.snmp_community = payload.snmp_community || null;
             payload.snmp_port = payload.snmp_port ? parseInt(payload.snmp_port) : null;
 
-            await api.post('/config/nodes', payload);
+            // Validate that at least one protocol is enabled
+            if (!payload.monitor_ping && !payload.monitor_snmp) {
+                toast.error("At least one monitoring protocol (PING or SNMP) must be enabled");
+                return;
+            }
+
+            if (editingNode) {
+                // Update existing node
+                await api.put(`/config/nodes/${editingNode.id}`, payload);
+                toast.success("Node updated successfully");
+            } else {
+                // Create new node
+                await api.post('/config/nodes', payload);
+                toast.success("Node created successfully");
+            }
+
+            // Reset form
             setNewNode({
                 name: '',
                 ip: '',
@@ -97,10 +113,10 @@ const Config = () => {
                 snmp_community: '',
                 snmp_port: ''
             });
-            toast.success("Node created successfully");
+            setEditingNode(null);
             fetchData();
         } catch (err) {
-            let message = "Failed to create node";
+            let message = editingNode ? "Failed to update node" : "Failed to create node";
             if (err.response?.data?.detail) {
                 const detail = err.response.data.detail;
                 if (Array.isArray(detail)) {
@@ -111,6 +127,36 @@ const Config = () => {
             }
             toast.error(message);
         }
+    };
+
+    const handleEditNode = (node) => {
+        setEditingNode(node);
+        setNewNode({
+            name: node.name,
+            ip: node.ip,
+            group_id: node.group_id,
+            interval: node.interval !== null ? node.interval.toString() : '',
+            packet_count: node.packet_count !== null ? node.packet_count.toString() : '',
+            monitor_ping: node.monitor_ping !== null ? node.monitor_ping : true,
+            monitor_snmp: node.monitor_snmp !== null ? node.monitor_snmp : false,
+            snmp_community: node.snmp_community || '',
+            snmp_port: node.snmp_port !== null ? node.snmp_port.toString() : ''
+        });
+    };
+
+    const handleCancelEdit = () => {
+        setEditingNode(null);
+        setNewNode({
+            name: '',
+            ip: '',
+            group_id: '',
+            interval: '',
+            packet_count: '',
+            monitor_ping: true,
+            monitor_snmp: false,
+            snmp_community: '',
+            snmp_port: ''
+        });
     };
 
     const [deleteConfirm, setDeleteConfirm] = useState({ type: null, id: null });
@@ -370,10 +416,22 @@ const Config = () => {
 
             {activeTab === 'nodes' && (
                 <div className="bg-surface p-6 rounded-xl border border-slate-700 shadow-sm space-y-6">
-                    <h3 className="text-xl font-semibold text-slate-100">Nodes</h3>
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-xl font-semibold text-slate-100">
+                            {editingNode ? `Edit Node: ${editingNode.name}` : 'Nodes'}
+                        </h3>
+                        {editingNode && (
+                            <button
+                                onClick={handleCancelEdit}
+                                className="text-sm text-slate-400 hover:text-white transition-colors"
+                            >
+                                Cancel Edit
+                            </button>
+                        )}
+                    </div>
 
-                    {/* Create Node Form */}
-                    <form onSubmit={handleCreateNode} className="grid grid-cols-1 gap-4 bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
+                    {/* Create/Edit Node Form */}
+                    <form onSubmit={handleCreateOrUpdateNode} className={`grid grid-cols-1 gap-4 p-4 rounded-lg border ${editingNode ? 'bg-blue-900/20 border-blue-500/30' : 'bg-slate-800/50 border-slate-700/50'}`}>
                         {/* Basic Info Row */}
                         <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                             <div className="col-span-1 md:col-span-3">
@@ -466,9 +524,22 @@ const Config = () => {
                             </div>
                         )}
 
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-2">
+                            {editingNode && (
+                                <button
+                                    type="button"
+                                    onClick={handleCancelEdit}
+                                    className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            )}
                             <button type="submit" className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors flex items-center justify-center">
-                                <Plus size={18} className="mr-2" /> Add Node
+                                {editingNode ? (
+                                    'Update Node'
+                                ) : (
+                                    <><Plus size={18} className="mr-2" /> Add Node</>
+                                )}
                             </button>
                         </div>
                     </form>
@@ -497,8 +568,16 @@ const Config = () => {
                             <tbody className="divide-y divide-slate-700">
                                 {getSortedNodes().map(n => {
                                     const group = groups.find(g => g.id === n.group_id);
+                                    const isEditing = editingNode?.id === n.id;
                                     return (
-                                        <tr key={n.id} className="hover:bg-slate-800/30 transition-colors">
+                                        <tr
+                                            key={n.id}
+                                            onClick={() => handleEditNode(n)}
+                                            className={`transition-colors cursor-pointer ${isEditing
+                                                ? 'bg-blue-900/30 hover:bg-blue-900/40'
+                                                : 'hover:bg-slate-800/30'
+                                                }`}
+                                        >
                                             <td className="px-4 py-3 font-medium">{n.name}</td>
                                             <td className="px-4 py-3 text-slate-400">{n.ip}</td>
                                             <td className="px-4 py-3"><span className="bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded-full">{group ? group.name : 'Unknown'}</span></td>

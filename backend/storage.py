@@ -25,6 +25,10 @@ class Storage:
             self.client = None
             self.write_api = None
             logger.info("InfluxDB not configured. Using file logging.")
+        
+        # Lock for file operations to prevent race conditions
+        import asyncio
+        self._file_lock = asyncio.Lock()
 
     async def write_monitor_result(
         self, 
@@ -117,23 +121,32 @@ class Storage:
             "ping_responses": formatted_responses if formatted_responses else None
         }
         
-        try:
-            log_file = "backend/data/ping_logs.json"
-            async with aiofiles.open(log_file, mode='a') as f:
-                import json
-                await f.write(json.dumps(entry) + "\n")
-        except Exception as e:
-            logger.error(f"Error writing to log file: {e}")
+        # File logging with lock to prevent race conditions
+        # Use absolute path to avoid issues with working directory
+        import pathlib
+        log_file = pathlib.Path(__file__).parent / "data" / "ping_logs.json"
+        log_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
         
-        # Basic log rotation (keep last 10000 lines)
-        try:
-            async with aiofiles.open(log_file, mode='r') as f:
-                lines = await f.readlines()
-            if len(lines) > 10000:
-                async with aiofiles.open(log_file, mode='w') as f:
-                    await f.writelines(lines[-10000:])
-        except Exception as e:
-            logger.debug(f"Log rotation skipped: {e}")
+        async with self._file_lock:
+            try:
+                # Write new entry
+                async with aiofiles.open(log_file, mode='a') as f:
+                    import json
+                    await f.write(json.dumps(entry) + "\n")
+            except Exception as e:
+                logger.error(f"Error writing to log file: {e}")
+                return
+            
+            # Log rotation (keep last 200 lines)
+            try:
+                async with aiofiles.open(log_file, mode='r') as f:
+                    lines = await f.readlines()
+                if len(lines) > 200:
+                    async with aiofiles.open(log_file, mode='w') as f:
+                        await f.writelines(lines[-200:])
+                        logger.debug(f"Rotated log file: {len(lines)} -> 200 lines")
+            except Exception as e:
+                logger.debug(f"Log rotation skipped: {e}")
 
 # Global storage instance
 storage = Storage()
