@@ -305,28 +305,36 @@ const Config = () => {
 
     return (
         <div className="space-y-6">
-            <header className="flex items-center justify-between mb-8">
+            <header className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                 <div>
                     <h2 className="text-3xl font-bold text-slate-100">Configuration</h2>
                     <p className="text-slate-400">Manage groups and nodes</p>
                 </div>
-            </header>
 
-            {/* Tabs */}
-            <div className="flex space-x-1 bg-surface p-1 rounded-lg w-fit border border-slate-700">
-                <button
-                    onClick={() => setActiveTab('nodes')}
-                    className={`px-4 py-2 rounded-md transition-all ${activeTab === 'nodes' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-                >Nodes</button>
-                <button
-                    onClick={() => setActiveTab('groups')}
-                    className={`px-4 py-2 rounded-md transition-all ${activeTab === 'groups' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-                >Groups</button>
-                <button
-                    onClick={() => setActiveTab('metrics')}
-                    className={`px-4 py-2 rounded-md transition-all ${activeTab === 'metrics' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-                >SNMP</button>
-            </div>
+                <div className="flex items-center gap-6">
+                    {/* Tabs moved to Header */}
+                    <div className="flex space-x-1 bg-surface p-1 rounded-lg border border-slate-700">
+                        <button
+                            onClick={() => setActiveTab('nodes')}
+                            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'nodes' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                        >Nodes</button>
+                        <button
+                            onClick={() => setActiveTab('metrics')}
+                            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'metrics' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                        >SNMP</button>
+                        <button
+                            onClick={() => setActiveTab('groups')}
+                            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'groups' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                        >Groups</button>
+                    </div>
+
+                    <img
+                        src="/logo_transparant.png"
+                        alt="BeamState Logo"
+                        className="h-16 object-contain hidden md:block"
+                    />
+                </div>
+            </header>
 
             {activeTab === 'groups' && (
                 <div className="bg-surface p-6 rounded-xl border border-slate-700 shadow-sm space-y-6">

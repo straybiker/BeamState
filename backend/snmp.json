@@ -1,0 +1,110 @@
+[
+    {
+        "name": "Traffic In (Std)",
+        "oid_template": "1.3.6.1.2.1.2.2.1.10.{index}",
+        "metric_type": "counter",
+        "unit": "bytes",
+        "category": "interface",
+        "device_type": "generic",
+        "requires_index": true
+    },
+    {
+        "name": "Traffic Out (Std)",
+        "oid_template": "1.3.6.1.2.1.2.2.1.16.{index}",
+        "metric_type": "counter",
+        "unit": "bytes",
+        "category": "interface",
+        "device_type": "generic",
+        "requires_index": true
+    },
+    {
+        "name": "Interface Errors In",
+        "oid_template": "1.3.6.1.2.1.2.2.1.14.{index}",
+        "metric_type": "counter",
+        "unit": "errors",
+        "category": "interface",
+        "device_type": "generic",
+        "requires_index": true
+    },
+    {
+        "name": "Interface Errors Out",
+        "oid_template": "1.3.6.1.2.1.2.2.1.20.{index}",
+        "metric_type": "counter",
+        "unit": "errors",
+        "category": "interface",
+        "device_type": "generic",
+        "requires_index": true
+    },
+    {
+        "name": "Interface Status",
+        "oid_template": "1.3.6.1.2.1.2.2.1.8.{index}",
+        "metric_type": "gauge",
+        "unit": "status",
+        "category": "interface",
+        "device_type": "generic",
+        "requires_index": true
+    },
+    {
+        "name": "Traffic In (HC)",
+        "oid_template": "1.3.6.1.2.1.31.1.1.1.6.{index}",
+        "metric_type": "counter",
+        "unit": "bytes",
+        "category": "interface",
+        "device_type": "generic",
+        "requires_index": true
+    },
+    {
+        "name": "Traffic Out (HC)",
+        "oid_template": "1.3.6.1.2.1.31.1.1.1.10.{index}",
+        "metric_type": "counter",
+        "unit": "bytes",
+        "category": "interface",
+        "device_type": "generic",
+        "requires_index": true
+    },
+    {
+        "name": "CPU Utilization",
+        "oid_template": "1.3.6.1.2.1.25.3.3.1.2.{index}",
+        "metric_type": "gauge",
+        "unit": "percent",
+        "category": "system",
+        "device_type": "generic",
+        "requires_index": true
+    },
+    {
+        "name": "Temperature",
+        "oid_template": "1.3.6.1.4.1.4413.1.1.43.1.8.1.5.1.0",
+        "metric_type": "gauge",
+        "unit": "celsius",
+        "category": "system",
+        "device_type": "generic",
+        "requires_index": false
+    },
+    {
+        "name": "CPU Load (%)",
+        "oid_template": "1.3.6.1.4.1.4413.1.1.43.1.8.1.4.1.0",
+        "metric_type": "gauge",
+        "unit": "percent",
+        "category": "system",
+        "device_type": "generic",
+        "requires_index": false
+    },
+    {
+        "name": "Linux Load (1m)",
+        "oid_template": "1.3.6.1.4.1.2021.10.1.5.1",
+        "metric_type": "gauge",
+        "unit": "load_x100",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "Linux Mem Available",
+        "oid_template": "1.3.6.1.4.1.2021.4.6.0",
+        "metric_type": "gauge",
+        "unit": "kbytes",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    }
+]

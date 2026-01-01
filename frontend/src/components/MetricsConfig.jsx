@@ -211,8 +211,12 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                                     <tbody className="divide-y divide-slate-700/50">
                                         {interfaces.map(iface => {
                                             const isExpanded = expandedInterfaces.has(iface.index);
-                                            // Count active metrics for summary
-                                            const activeCount = localConfig.filter(m => m.interface_index === iface.index).length;
+                                            // Count active metrics for summary (only interface category)
+                                            const activeCount = localConfig.filter(m => {
+                                                if (m.interface_index !== iface.index) return false;
+                                                const def = definitions.find(d => d.id === m.metric_definition_id);
+                                                return def && def.category === 'interface';
+                                            }).length;
 
                                             // Auto-expand if active metrics exist (optional UX choice, keeping manual for now or auto on load?)
                                             // Let's keep manual expansion, but highlight row if active.
@@ -266,7 +270,9 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                                                                                         onChange={() => handleToggleMetric(def.id, iface.index, iface.name)}
                                                                                     />
                                                                                     <span className={`text-sm ${isChecked ? 'text-white' : 'text-slate-400 group-hover:text-slate-300'}`}>
-                                                                                        {def.name.replace('Interface ', '')}
+                                                                                        {def.name.replace('Interface ', '')
+                                                                                            .replace('Bytes In', 'Traffic In (Legacy)')
+                                                                                            .replace('Bytes Out', 'Traffic Out (Legacy)')}
                                                                                     </span>
                                                                                 </label>
                                                                             );
@@ -294,23 +300,60 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                         </h4>
                         <div className="bg-slate-900/30 rounded-lg p-1 border border-slate-700/30 space-y-0.5">
                             {systemDefs.map(def => {
-                                const isChecked = isMetricEnabled(def.id);
+                                // Find specific config entry
+                                const configEntry = localConfig.find(m => m.metric_definition_id === def.id);
+                                const isChecked = !!configEntry;
+                                const currentIndex = configEntry ? (configEntry.interface_index ?? 1) : 1;
+
                                 return (
-                                    <label key={def.id} className="flex items-center p-3 hover:bg-slate-800/50 rounded-md cursor-pointer transition-colors group">
-                                        <div className={`w-4 h-4 rounded border flex items-center justify-center mr-3 transition-colors ${isChecked ? 'bg-purple-500 border-purple-500' : 'border-slate-600'}`}>
-                                            {isChecked && <Check size={10} className="text-white" />}
-                                        </div>
-                                        <input
-                                            type="checkbox"
-                                            className="hidden"
-                                            checked={isChecked}
-                                            onChange={() => handleToggleMetric(def.id)}
-                                        />
-                                        <div>
-                                            <div className={`text-sm font-medium ${isChecked ? 'text-white' : 'text-slate-300'}`}>{def.name}</div>
-                                            <div className="text-xs text-slate-500">{def.oid_template}</div>
-                                        </div>
-                                    </label>
+                                    <div key={def.id} className="flex items-center justify-between p-3 hover:bg-slate-800/50 rounded-md transition-colors group">
+                                        <label className="flex items-center cursor-pointer flex-1">
+                                            <div className={`w-4 h-4 rounded border flex items-center justify-center mr-3 transition-colors ${isChecked ? 'bg-purple-500 border-purple-500' : 'border-slate-600'}`}>
+                                                {isChecked && <Check size={10} className="text-white" />}
+                                            </div>
+                                            <input
+                                                type="checkbox"
+                                                className="hidden"
+                                                checked={isChecked}
+                                                // If toggling on, check if index is required. 
+                                                // If toggling off, pass the current index to ensure removal match.
+                                                onChange={() => {
+                                                    if (isChecked) {
+                                                        // Toggle Off: remove by passing current index (could be null or a number)
+                                                        handleToggleMetric(def.id, configEntry.interface_index);
+                                                    } else {
+                                                        // Toggle On: default to 1 if index required, else null
+                                                        const idx = def.requires_index ? 1 : null;
+                                                        handleToggleMetric(def.id, idx);
+                                                    }
+                                                }}
+                                            />
+                                            <div>
+                                                <div className={`text-sm font-medium ${isChecked ? 'text-white' : 'text-slate-300'}`}>{def.name}</div>
+                                                <div className="text-xs text-slate-500">{def.oid_template}</div>
+                                            </div>
+                                        </label>
+
+                                        {def.requires_index && isChecked && (
+                                            <div className="ml-4 flex items-center space-x-2">
+                                                <span className="text-xs text-slate-500">Idx:</span>
+                                                <input
+                                                    type="number"
+                                                    className="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:border-purple-500 outline-none"
+                                                    value={currentIndex}
+                                                    onChange={(e) => {
+                                                        const val = parseInt(e.target.value);
+                                                        // Update existing entry with new index
+                                                        const newConfig = localConfig.map(c =>
+                                                            c.metric_definition_id === def.id ? { ...c, interface_index: val } : c
+                                                        );
+                                                        setLocalConfig(newConfig);
+                                                    }}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
                                 );
                             })}
                         </div>

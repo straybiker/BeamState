@@ -125,19 +125,19 @@ const Dashboard = () => {
                                     }
 
                                     return (
-                                        <div key={node.node_id} className="bg-slate-800/50 rounded-lg p-3 flex items-center justify-between hover:bg-slate-800 transition-colors border border-slate-700/50">
-                                            <div className="flex items-center space-x-3">
-                                                <div className={`p-2 rounded-full ${bgColor} ${statusColor}`}>
+                                        <div key={node.node_id} className="bg-slate-800/50 rounded-lg p-3 grid grid-cols-12 items-center gap-2 hover:bg-slate-800 transition-colors border border-slate-700/50">
+                                            <div className="col-span-7 flex items-center space-x-3 min-w-0">
+                                                <div className={`p-2 rounded-full flex-shrink-0 ${bgColor} ${statusColor}`}>
                                                     {icon}
                                                 </div>
-                                                <div>
-                                                    <div className="font-medium text-slate-200">{node.node_name}</div>
-                                                    <div className="text-xs text-slate-500">{node.ip}</div>
+                                                <div className="min-w-0">
+                                                    <div className="font-medium text-slate-200 truncate">{node.node_name}</div>
+                                                    <div className="text-xs text-slate-500 truncate">{node.ip}</div>
                                                 </div>
                                             </div>
 
                                             {/* Protocol Badges - Centered */}
-                                            <div className="flex gap-1">
+                                            <div className="col-span-2 flex justify-center gap-1">
                                                 {node.monitor_ping && (
                                                     <span className="px-1.5 py-0.5 text-[10px] font-medium bg-blue-500/20 text-blue-400 rounded border border-blue-500/30">
                                                         PING
@@ -150,7 +150,7 @@ const Dashboard = () => {
                                                 )}
                                             </div>
 
-                                            <div className="text-right">
+                                            <div className="col-span-3 text-right">
                                                 <div className={`text-sm font-bold ${statusColor}`}>
                                                     {node.status}
                                                     {isPending && <span className="text-xs ml-1 opacity-75">({node.retry_count || 0})</span>}

@@ -7,120 +7,31 @@ import logging
 
 logger = logging.getLogger("BeamState.SeedMetrics")
 
-DEFAULT_METRICS = [
-    # Interface Metrics (Generic - works on all devices)
-    {
-        "name": "Interface Bytes In",
-        "oid_template": "1.3.6.1.2.1.2.2.1.10.{index}",
-        "metric_type": "counter",
-        "unit": "bytes",
-        "category": "interface",
-        "device_type": "generic",
-        "requires_index": True
-    },
-    {
-        "name": "Interface Bytes Out",
-        "oid_template": "1.3.6.1.2.1.2.2.1.16.{index}",
-        "metric_type": "counter",
-        "unit": "bytes",
-        "category": "interface",
-        "device_type": "generic",
-        "requires_index": True
-    },
-    {
-        "name": "Interface Errors In",
-        "oid_template": "1.3.6.1.2.1.2.2.1.14.{index}",
-        "metric_type": "counter",
-        "unit": "errors",
-        "category": "interface",
-        "device_type": "generic",
-        "requires_index": True
-    },
-    {
-        "name": "Interface Errors Out",
-        "oid_template": "1.3.6.1.2.1.2.2.1.20.{index}",
-        "metric_type": "counter",
-        "unit": "errors",
-        "category": "interface",
-        "device_type": "generic",
-        "requires_index": True
-    },
-    {
-        "name": "Interface Status",
-        "oid_template": "1.3.6.1.2.1.2.2.1.8.{index}",
-        "metric_type": "gauge",
-        "unit": "status",
-        "category": "interface",
-        "device_type": "generic",
-        "requires_index": True
-    },
-    {
-        "name": "Traffic In (HC)",
-        "oid_template": "1.3.6.1.2.1.31.1.1.1.6.{index}",
-        "metric_type": "counter",
-        "unit": "bytes",
-        "category": "interface",
-        "device_type": "generic",
-        "requires_index": True
-    },
-    {
-        "name": "Traffic Out (HC)",
-        "oid_template": "1.3.6.1.2.1.31.1.1.1.10.{index}",
-        "metric_type": "counter",
-        "unit": "bytes",
-        "category": "interface",
-        "device_type": "generic",
-        "requires_index": True
-    },
-    
-    # System Metrics (Generic)
-    {
-        "name": "CPU Utilization",
-        "oid_template": "1.3.6.1.2.1.25.3.3.1.2.{index}",
-        "metric_type": "gauge",
-        "unit": "percent",
-        "category": "system",
-        "device_type": "generic",
-        "requires_index": True  # CPU index, usually 1
-    },
-    
-    # EdgeSwitch / Unifi Switch Specific
-    {
-        "name": "Temperature",
-        "oid_template": "1.3.6.1.4.1.4413.1.1.43.1.8.1.5.1.0",
-        "metric_type": "gauge",
-        "unit": "celsius",
-        "category": "system",
-        "device_type": "generic",
-        "requires_index": False
-    },
-    {
-        "name": "CPU % (Alt. OID)",
-        "oid_template": "1.3.6.1.4.1.4413.1.1.1.1.4.6.1.3.1",
-        "metric_type": "gauge",
-        "unit": "percent",
-        "category": "system",
-        "device_type": "generic",
-        "requires_index": False
-    },
-    {
-        "name": "CPU Load (%)",
-        "oid_template": "1.3.6.1.4.1.4413.1.1.43.1.8.1.4.1.0",
-        "metric_type": "gauge",
-        "unit": "percent",
-        "category": "system",
-        "device_type": "generic",
-        "requires_index": False
-    }
-]
+import json
+import os
+
+def load_metrics_from_file():
+    """Load metrics from snmp.json"""
+    file_path = os.path.join(os.path.dirname(__file__), "snmp.json")
+    try:
+        with open(file_path, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.error(f"snmp.json not found at {file_path}")
+        return []
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing snmp.json: {e}")
+        return []
 
 def seed_metric_definitions():
-    """Seed the database with default metric definitions"""
+    """Seed the database with default metric definitions from file"""
     db = SessionLocal()
     try:
         count = 0
+        metrics_data = load_metrics_from_file()
+        
         # Add default metrics if they don't exist
-        for metric_data in DEFAULT_METRICS:
+        for metric_data in metrics_data:
             existing = db.query(MetricDefinitionDB).filter(
                 MetricDefinitionDB.name == metric_data["name"]
             ).first()
@@ -135,7 +46,7 @@ def seed_metric_definitions():
             db.commit()
             logger.info(f"Seeded {count} new metric definitions")
         else:
-            logger.info("All default metrics already exist")
+            logger.info("All metrics from file already exist")
             
     except Exception as e:
         logger.error(f"Error seeding metric definitions: {e}")

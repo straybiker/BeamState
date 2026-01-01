@@ -1,49 +1,23 @@
 # BeamState
+**Network Monitoring Solution**
 
-A real-time network monitoring application that pings configured nodes and displays their status on a beautiful dashboard.
+A real-time network monitoring application that pings configured nodes, monitors SNMP metrics (Cpu, Memory, Traffic, etc.), and displays their status on a beautiful, dark-themed dashboard.
 
-![BeamState Dashboard](frontend/public/logo.png)
+![BeamState Dashboard](frontend/public/logo_transparant.png)
 
 ## Features
 
-- **Real-time Monitoring**: Async pinging with configurable intervals per group or node
-- **Modern Dashboard**: Dark-themed UI showing node status, latency, and packet loss
-- **Web-Based Configuration**: Add, edit, and remove groups and nodes directly from the UI
-- **Flexible Storage**: Supports InfluxDB for production or JSON file logging for development
-- **Bootstrap Config**: Optionally define initial network topology in `config.json` for automatic database seeding on startup
-- **PWA Support**: Install as a mobile app for quick access
+- **Real-time Monitoring**: Async pinging with configurable intervals.
+- **SNMP Support**: Monitor generic and specific OIDs (Interface Traffic, CPU, Memory, Uptime).
+- **Customizable Metrics**: Define your own OIDs in `backend/snmp.json` and configure them via the UI.
+- **Modern Dashboard**: Dark-themed UI showing node status, latency, SNMP availability, and detailed metrics.
+- **Web-Based Configuration**: Add, edit, and remove groups/nodes/metrics directly from the UI.
+- **Flexible Storage**: SQLite for configuration/cache, optional InfluxDB for time-series data.
+- **Bootstrap Config**: Define initial topology in `config.json` for automatic seeding.
 
-## Tech Stack
+## Quick Start (Windows)
 
-- **Backend**: FastAPI, SQLAlchemy, aioping, InfluxDB client
-- **Frontend**: React, Vite, Tailwind CSS, Lucide icons
-- **Database**: SQLite (local), InfluxDB (optional for metrics)
-- **Deployment**: Docker Compose
-
-## Architecture & Persistence
-
-BeamState uses a **Hybrid Storage Strategy** to balance speed and usability:
-
-1.  **`backend/data/beamstate.db` (The Engine)**:
-    - A high-performance **Runtime Cache** using SQLite.
-    - Used by the Pinger and API for fast, concurrent access and complex relationship queries.
-    - Functions as the application's reliable "RAM".
-
-2.  **`backend/config.json` (The Blueprint)**:
-    - The **Human-Readable Source of Truth**.
-    - All configuration changes made in the UI are immediately synced here.
-    - Ensures **Persistence** and **Portability**: If the database is deleted or corrupted, the system rebuilds itself entirely from this file on startup.
-    - You can back up or share this file to preserve your network topology.
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- Docker (optional, for containerized deployment)
-
-### Local Development
+The easiest way to run the application locally on Windows is via the provided PowerShell script.
 
 1. **Clone the repository**
    ```bash
@@ -51,166 +25,67 @@ BeamState uses a **Hybrid Storage Strategy** to balance speed and usability:
    cd BeamState
    ```
 
-2. **Start the Backend**
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   python -m uvicorn main:app --reload --port 8000
+2. **Start the Application**
+   Open PowerShell as **Administrator** (required for ICMP Ping) and run:
+   ```powershell
+   .\start-app.ps1
    ```
+   This script will:
+   - Check and stop any existing instances on ports 8000/5173.
+   - Start the Backend (Uvicorn) on port 8000.
+   - Start the Frontend (Vite) on port 5173.
 
-3. **Start the Frontend** (in a new terminal)
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-
-4. **Open the Application**
-   - Frontend: http://localhost:5173
-   - Backend API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
-
-### Docker Deployment
-
-```bash
-docker-compose up -d
-```
-
-This starts:
-- **Frontend**: http://localhost:3000
-- **Backend**: http://localhost:8000
-- **InfluxDB**: http://localhost:8086 (admin/adminpassword)
+3. **Open the Application**
+   - Frontend: [http://localhost:5173](http://localhost:5173)
+   - Backend API: [http://localhost:8000](http://localhost:8000)
+   - API Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ## Configuration
 
-### config.json
+### Network Topology (`config.json`)
+The `backend/config.json` file acts as a blueprint. On startup, the database syncs with this file.
 
-Define your network topology in `backend/config.json`. The database syncs with this file on startup.
+### SNMP Metrics (`snmp.json`)
+Default SNMP metric definitions are stored in `backend/snmp.json`. You can add custom OIDs here.
+- **oid_template**: Use `{index}` placeholder for interface metrics.
+- **requires_index**: Set to `true` if the user needs to specify an index (e.g., Interface ID) or `false` for scalar values (like System Uptime).
 
+Example:
 ```json
 {
-    "groups": [
-        {
-            "id": 1,
-            "name": "Infrastructure",
-            "interval": 60,
-            "packet_count": 1,
-            "nodes": [
-                {
-                    "id": 1,
-                    "name": "Router",
-                    "ip": "192.168.1.1",
-                    "interval": 30
-                },
-                {
-                    "id": 2,
-                    "name": "Switch",
-                    "ip": "192.168.1.2"
-                }
-            ]
-        }
-    ]
+    "name": "Custom Temp",
+    "oid_template": "1.3.6.1.4.1.9.9.13.1.3.1.3.{index}",
+    "metric_type": "gauge",
+    "unit": "celsius",
+    "category": "environment",
+    "device_type": "cisco",
+    "requires_index": true
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `id` | Unique identifier (required for sync) |
-| `name` | Display name |
-| `interval` | Seconds between pings (group default or node override) |
-| `packet_count` | Number of ping packets to send |
-| `ip` | IPv4 address to ping |
+## Tech Stack
 
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DB_PATH` | `backend/data/beamstate.db` | SQLite database path |
-| `LOG_FILE` | `backend/data/ping_logs.json` | JSON log file path |
-| `INFLUXDB_URL` | - | InfluxDB URL (enables InfluxDB logging) |
-| `INFLUXDB_TOKEN` | - | InfluxDB authentication token |
-| `INFLUXDB_ORG` | - | InfluxDB organization |
-| `INFLUXDB_BUCKET` | - | InfluxDB bucket name |
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | Health check |
-| GET | `/status` | Current pinger status and all node results |
-| GET | `/config/groups` | List all groups |
-| POST | `/config/groups` | Create a new group |
-| DELETE | `/config/groups/{id}` | Delete a group |
-| GET | `/config/nodes` | List all nodes |
-| POST | `/config/nodes` | Create a new node |
-| PUT | `/config/nodes/{id}` | Update a node |
-| DELETE | `/config/nodes/{id}` | Delete a node |
-
-Full API documentation available at `/docs` when running the backend.
+- **Backend**: Python 3.11+, FastAPI, SQLAlchemy, pysnmp-lextudio, ping3.
+- **Frontend**: React, Vite, Tailwind CSS, Lucide Icons.
+- **Database**: SQLite.
 
 ## Project Structure
 
 ```
 BeamState/
 ├── backend/
-│   ├── main.py           # FastAPI app entry point
-│   ├── node_pinger.py    # Async ping loop
-│   ├── models.py         # SQLAlchemy + Pydantic models
-│   ├── database.py       # Database connection
-│   ├── storage.py        # InfluxDB/JSON storage
-│   ├── cleanup.py        # Config sync logic
-│   ├── config.json       # Network topology definition
-│   ├── routers/
-│   │   └── config.py     # CRUD API routes
-│   ├── data/
-│   │   ├── beamstate.db  # SQLite database
-│   │   └── ping_logs.json # JSON ping logs
-│   ├── Dockerfile
-│   └── requirements.txt
+│   ├── main.py             # App entry point
+│   ├── snmp.json           # Default SNMP definitions
+│   ├── config.json         # Network topology
+│   ├── monitors/           # Ping and SNMP monitor logic
+│   ├── routers/            # API endpoints
+│   └── data/               # SQLite DB
 ├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Dashboard.jsx
-│   │   │   ├── Config.jsx
-│   │   │   └── Layout.jsx
-│   │   ├── api.js
-│   │   └── main.jsx
-│   ├── public/
-│   │   ├── logo.png
-│   │   └── manifest.json
-│   └── package.json
-├── docker-compose.yml
-└── README.md
+│   ├── src/components/     # React components
+│   └── public/             # Assets
+└── start-app.ps1           # Startup script
 ```
-
-## Screenshots
-
-### Dashboard
-Real-time status of all monitored nodes grouped by category.
-
-### Configuration
-Manage groups and nodes with sortable tables.
-
-## Troubleshooting
-
-### Pings not working?
-- Ensure the backend is running with admin/root privileges (ICMP requires elevated permissions)
-- On Windows, run PowerShell as Administrator
-- On Linux/Docker, the container needs `NET_ADMIN` capability
-
-### Multiple ping entries in logs?
-- Check for zombie Python processes: `tasklist /FI "IMAGENAME eq python.exe"`
-- Kill all with: `taskkill /F /IM python.exe`
-
-### Frontend not connecting?
-- Ensure backend is running on port 8000
-- Check CORS settings in `backend/main.py`
 
 ## License
 
-MIT License - feel free to use and modify.
-
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
+MIT License

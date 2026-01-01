@@ -82,6 +82,8 @@ const MetricsDashboard = () => {
 
     const formatValue = (val, type, unit) => {
         if (val === undefined || val === null) return '-';
+        if (unit === 'kbytes') return formatValue(val * 1024, type, 'bytes');
+        if (unit === 'load_x100') return (val / 100).toFixed(2);
         if (unit === 'bytes') {
             const bytes = parseInt(val);
             if (isNaN(bytes)) return val;
@@ -120,6 +122,11 @@ const MetricsDashboard = () => {
                     <h2 className="text-3xl font-bold text-slate-100">SNMP Dashboard</h2>
                     <p className="text-slate-400">Real-time SNMP data</p>
                 </div>
+                <img
+                    src="/logo_transparant.png"
+                    alt="BeamState Logo"
+                    className="h-16 object-contain hidden md:block"
+                />
             </header>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
