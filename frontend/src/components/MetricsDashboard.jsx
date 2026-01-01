@@ -90,6 +90,19 @@ const MetricsDashboard = () => {
             if (bytes > 1000) return `${(bytes / 1000).toFixed(2)} KB`;
             return `${bytes} B`;
         }
+        if (unit === 'status') {
+            const statusMap = {
+                1: 'Up',
+                2: 'Down',
+                3: 'Testing',
+                4: 'Unknown',
+                5: 'Dormant',
+                6: 'Not Present',
+                7: 'Lower Layer Down'
+            };
+            const statusText = statusMap[val] || 'Unknown';
+            return `${statusText} (${val})`;
+        }
         if (unit === 'percent') return `${val}%`;
         if (unit === 'celsius') return `${val}°C`;
         return val;
@@ -128,6 +141,9 @@ const MetricsDashboard = () => {
                                     name: c.interface_name || `Idx ${c.interface_index}`,
                                     trafficIn: null,    // Metric Obj
                                     trafficOut: null,   // Metric Obj
+                                    errorsIn: null,
+                                    errorsOut: null,
+                                    status: null,
                                     other: []
                                 };
                             }
@@ -138,6 +154,12 @@ const MetricsDashboard = () => {
                                 ifObj.trafficIn = { ...c, def };
                             } else if (nameLower.includes('out') && (nameLower.includes('bytes') || nameLower.includes('traffic'))) {
                                 ifObj.trafficOut = { ...c, def };
+                            } else if (nameLower.includes('in') && nameLower.includes('errors')) {
+                                ifObj.errorsIn = { ...c, def };
+                            } else if (nameLower.includes('out') && nameLower.includes('errors')) {
+                                ifObj.errorsOut = { ...c, def };
+                            } else if (nameLower.includes('status')) {
+                                ifObj.status = { ...c, def };
                             } else {
                                 ifObj.other.push({ ...c, def });
                             }
@@ -185,16 +207,13 @@ const MetricsDashboard = () => {
                                     <div className="space-y-4">
                                         {Object.values(interfaces).map(iface => {
                                             // Get Rate from backend
-                                            const rateIn = iface.trafficIn ? currentValues[iface.trafficIn.id]?.rate || 0 : 0;
-                                            const rateOut = iface.trafficOut ? currentValues[iface.trafficOut.id]?.rate || 0 : 0;
-                                            const rateTotal = rateIn + rateOut;
-
-                                            // Calculate Total manually if needed, or if backend helps
-                                            // But wait, Total is just In + Out sum. 
-                                            // Backend doesn't have a "Total" metric unless we define one.
-                                            // Summing rates client-side is fine.
+                                            const rateIn = iface.trafficIn ? (currentValues[iface.trafficIn.id]?.rate ?? 0) : null;
+                                            const rateOut = iface.trafficOut ? (currentValues[iface.trafficOut.id]?.rate ?? 0) : null;
+                                            const rateTotal = (rateIn || 0) + (rateOut || 0);
 
                                             const hasTraffic = iface.trafficIn || iface.trafficOut;
+                                            const hasErrors = iface.errorsIn || iface.errorsOut;
+                                            const hasStatus = iface.status;
 
                                             return (
                                                 <div key={iface.name} className="bg-slate-900/30 rounded-lg border border-slate-700/30 overflow-hidden">
@@ -214,7 +233,6 @@ const MetricsDashboard = () => {
                                                                         <ArrowDown size={10} className="mr-1" /> In
                                                                     </div>
                                                                     <div className="text-base font-mono text-white leading-none">{formatBits(rateIn)}</div>
-                                                                    {/* <div className="text-[10px] text-slate-600 font-mono">Total: {formatValue(currentValues[iface.trafficIn?.id]?.value, 'counter', 'bytes')}</div> */}
                                                                 </div>
                                                                 <div className="space-y-1 text-right">
                                                                     <div className="text-[10px] uppercase text-slate-500 font-bold flex items-center justify-end">
@@ -225,9 +243,37 @@ const MetricsDashboard = () => {
                                                             </div>
                                                         )}
 
-                                                        {/* Other Metrics (Errors, Status etc) */}
+                                                        {/* Errors Grid: [Errors In] [Errors Out] */}
+                                                        {hasErrors && (
+                                                            <div className={`grid grid-cols-2 gap-4 ${hasTraffic ? 'pt-2 border-t border-slate-700/30' : ''}`}>
+                                                                <div className="flex justify-between text-xs">
+                                                                    <span className="text-slate-500 truncate">Errors In</span>
+                                                                    <span className="text-slate-300 font-mono">
+                                                                        {iface.errorsIn ? formatValue(currentValues[iface.errorsIn.id]?.value, iface.errorsIn.def.metric_type, iface.errorsIn.def.unit) : '-'}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex justify-between text-xs">
+                                                                    <span className="text-slate-500 truncate">Errors Out</span>
+                                                                    <span className="text-slate-300 font-mono">
+                                                                        {iface.errorsOut ? formatValue(currentValues[iface.errorsOut.id]?.value, iface.errorsOut.def.metric_type, iface.errorsOut.def.unit) : '-'}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Status Row */}
+                                                        {hasStatus && (
+                                                            <div className={`flex justify-between text-xs ${hasTraffic || hasErrors ? 'pt-2 border-t border-slate-700/30' : ''}`}>
+                                                                <span className="text-slate-500 truncate">Status</span>
+                                                                <span className="text-slate-300 font-mono">
+                                                                    {formatValue(currentValues[iface.status.id]?.value, iface.status.def.metric_type, iface.status.def.unit)}
+                                                                </span>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Other Metrics */}
                                                         {iface.other.length > 0 && (
-                                                            <div className={`grid grid-cols-2 gap-2 ${hasTraffic ? 'pt-2 border-t border-slate-700/30' : ''}`}>
+                                                            <div className={`grid grid-cols-2 gap-2 ${hasTraffic || hasErrors || hasStatus ? 'pt-2 border-t border-slate-700/30' : ''}`}>
                                                                 {iface.other.map(m => {
                                                                     const val = currentValues[m.id]?.value;
                                                                     return (
