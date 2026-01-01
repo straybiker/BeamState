@@ -1,9 +1,7 @@
-# BeamState
-**Network Monitoring Solution**
+<img src="frontend/public/logo_transparant.png" alt="BeamState Logo" width="150"># BeamState
+**Network Monitoring**
 
-A real-time network monitoring application that pings configured nodes, monitors SNMP metrics (Cpu, Memory, Traffic, etc.), and displays their status on a beautiful, dark-themed dashboard.
-
-![BeamState Dashboard](frontend/public/logo_transparant.png)
+A real-time network monitoring application that pings configured nodes, monitors SNMP metrics (Cpu, Memory, Traffic, etc.), and displays their status on a dashboard.
 
 ## Features
 
@@ -39,6 +37,31 @@ The easiest way to run the application locally on Windows is via the provided Po
    - Frontend: [http://localhost:5173](http://localhost:5173)
    - Backend API: [http://localhost:8000](http://localhost:8000)
    - API Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+## Docker Deployment
+
+For containerized deployment, use Docker Compose.
+
+**Prerequisites (Optional):**
+- InfluxDB 2.x (for time-series metrics storage). Configure connection via environment variables in `docker-compose.yml`.
+
+1. **Build and Start**
+   ```bash
+   docker-compose up -d --build
+   ```
+
+2. **Access the Application**
+   - Frontend: [http://localhost:3000](http://localhost:3000)
+   - Backend API: [http://localhost:8000](http://localhost:8000)
+
+3. **Data Persistence**
+   - SQLite database and logs are stored in `./backend/data/`.
+   - Network topology is persisted via `./backend/config.json`.
+
+4. **Stop**
+   ```bash
+   docker-compose down
+   ```
 
 ## Configuration
 
@@ -85,6 +108,33 @@ BeamState/
 │   └── public/             # Assets
 └── start-app.ps1           # Startup script
 ```
+
+## Features to Implement
+
+### Monitoring & Data Collection
+- [ ] **Log to InfluxDB and/or Logfile** - Make logging destination configurable
+- [ ] **Logfile Retention Setting** - Add configurable retention policy for JSON logs
+
+### Configuration UI
+- [ ] **InfluxDB Config in UI** - Add InfluxDB connection settings to configuration page
+- [ ] **Max Retries Config** - Expose `max_retries` setting in UI (currently only in config.json)
+- [ ] **Ping Timeout Config** - Expose ping timeout setting in UI (currently hardcoded to 5000ms)
+- [ ] **SNMP Timeout Config** - Expose SNMP timeout setting in UI (currently hardcoded to 5000ms)
+- [ ] **SNMP OID Config** - Expose SNMP OID setting in UI (currently only in config.json)
+- [ ] **SNMP Version Config** - Expose SNMP version setting in UI (currently only in config.json)
+
+### Dashboard
+- [ ] **Collapseable groups** - Add collapseable groups in dashboard
+- [ ] **Drag and drop nodes** - Add drag and drop functionality to move nodes in a group
+
+### Notifications
+- [ ] **Pushover Support** - Add Pushover integration for push notifications on node status changes
+
+### UI/UX Improvements
+- [ ] **Mobile Config Layout** - Fix node configuration table wrapping on mobile devices (too small)
+- [ ] **Auto-fill Group Interval** - When selecting a group in node config, auto-populate the group's default interval
+
+
 
 ## License
 

@@ -12,7 +12,6 @@ logger = logging.getLogger("BeamState.Metrics")
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
-print("LOADING METRICS MODULE V100 - CONFIRMED")
 
 # --- METRIC DEFINITIONS ---
 
@@ -123,7 +122,6 @@ def _sync_discover_interfaces(ip: str, port: int, community: str) -> list:
 @router.get("/discover-interfaces/{node_id}", response_model=List[NodeInterface])
 async def discover_interfaces(node_id: str, db: Session = Depends(get_db)):
     """Perform SNMP walk to discover interfaces on a node"""
-    print(f"=== DISCOVERY ENDPOINT HIT: {node_id} ===")
     logger.info(f"Received discovery request for node {node_id}")
     
     try:
@@ -142,7 +140,6 @@ async def discover_interfaces(node_id: str, db: Session = Depends(get_db)):
         port = node.snmp_port if node.snmp_port else (group.snmp_port if group else 161)
         
         logger.info(f"Targeting {node.ip}:{port} with v2c, community={community}")
-        print(f"=== CALLING SYNC DISCOVERY: {node.ip}:{port} ===")
 
         # Run synchronous SNMP in thread pool to avoid asyncio issues
         loop = asyncio.get_event_loop()
@@ -151,7 +148,6 @@ async def discover_interfaces(node_id: str, db: Session = Depends(get_db)):
             _sync_discover_interfaces,
             node.ip, port, community
         )
-        print(f"=== DISCOVERY SUCCESS: {len(interfaces)} interfaces ===")
         
         # Persist interfaces to DB
         # 1. Get existing interfaces
@@ -201,7 +197,6 @@ async def discover_interfaces(node_id: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         import traceback
-        print(f"=== DISCOVERY EXCEPTION: {e} ===")
         traceback.print_exc()
         logger.error(f"Discovery failed: {e}")
         raise HTTPException(status_code=500, detail=f"Discovery failed: {e}")

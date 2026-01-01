@@ -19,9 +19,6 @@ from monitor_manager import MonitorManager
 from routers import config
 from cleanup import sync_with_config
 
-# Setup Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("BeamState")
 
 # Initialize Monitor Manager
 pinger = MonitorManager()
@@ -89,4 +86,3 @@ def read_root():
 @app.get("/status")
 def get_pinger_status():
     return pinger.get_status()
-# Forced reload timestamp: 12/31/2025 16:18:20
