@@ -54,6 +54,24 @@ DEFAULT_METRICS = [
         "device_type": "generic",
         "requires_index": True
     },
+    {
+        "name": "Traffic In (HC)",
+        "oid_template": "1.3.6.1.2.1.31.1.1.1.6.{index}",
+        "metric_type": "counter",
+        "unit": "bytes",
+        "category": "interface",
+        "device_type": "generic",
+        "requires_index": True
+    },
+    {
+        "name": "Traffic Out (HC)",
+        "oid_template": "1.3.6.1.2.1.31.1.1.1.10.{index}",
+        "metric_type": "counter",
+        "unit": "bytes",
+        "category": "interface",
+        "device_type": "generic",
+        "requires_index": True
+    },
     
     # System Metrics (Generic)
     {

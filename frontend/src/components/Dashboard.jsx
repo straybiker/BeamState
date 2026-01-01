@@ -58,7 +58,7 @@ const Dashboard = () => {
         <div className="space-y-8">
             <header className="mb-6 flex items-center justify-between">
                 <div>
-                    <h2 className="text-3xl font-bold text-slate-100">Network Dashboard</h2>
+                    <h2 className="text-3xl font-bold text-slate-100">Monitoring Dashboard</h2>
                     <p className="text-slate-400">Real-time status of monitored devices</p>
                 </div>
                 <img

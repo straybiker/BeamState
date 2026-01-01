@@ -12,9 +12,11 @@ class SNMPDataCollector:
     def __init__(self):
         self.running = False
         self.collection_tasks = {}  # node_id -> task
-        # Current metric values: {node_metric_id: {'value': val, 'timestamp': ts}}
+        # Current metric values: {node_metric_id: {'value': val, 'rate': rate, 'timestamp': ts}}
         self.current_values = {}
-        
+        # Previous raw values for delta calc: {node_metric_id: {'value': val, 'timestamp': ts}}
+        self.previous_values = {} 
+        self.snmp_engine = SnmpEngine()        
     async def start(self):
         """Start the collector service"""
         self.running = True
@@ -48,9 +50,8 @@ class SNMPDataCollector:
                 finally:
                     db.close()
                     
-                # Sleep for 30s before next global check
-                # This limits resolution to 30s minimum for now
-                await asyncio.sleep(60) 
+                # Sleep for 10s (reduced for testing responsiveness)
+                await asyncio.sleep(10) 
                 
             except Exception as e:
                 logger.error(f"Error in main collection loop: {e}")
@@ -82,7 +83,13 @@ class SNMPDataCollector:
             for node_metric in node_metrics:
                 val = await self.collect_single_metric(node, node_metric, community, port)
                 if val is not None:
-                    self.store_metric_value(node_metric.id, val)
+                    # Pass the definition's metric type and unit to store_metric_value
+                    self.store_metric_value(
+                        node_metric.id, 
+                        val, 
+                        node_metric.metric_definition.metric_type,
+                        node_metric.metric_definition.unit
+                    )
                     
         except Exception as e:
             logger.error(f"Error collecting metrics for node {node_id}: {e}")
@@ -104,7 +111,7 @@ class SNMPDataCollector:
                 
             # Perform SNMP GET
             errorIndication, errorStatus, errorIndex, varBinds = await getCmd(
-                SnmpEngine(),
+                self.snmp_engine,
                 CommunityData(community),
                 UdpTransportTarget((node.ip, port), timeout=2.0, retries=1),
                 ContextData(),
@@ -127,21 +134,50 @@ class SNMPDataCollector:
             logger.error(f"Metric collection exception: {e}")
             return None
             
-    def store_metric_value(self, node_metric_id: str, value: str):
-        """Store the latest metric value in memory"""
-        self.current_values[node_metric_id] = {
+    def store_metric_value(self, node_metric_id: str, value: str, metric_type: str = 'gauge', unit: str = None):
+        """Store the latest metric value in memory and calculate rate if counter"""
+        now = time.time()
+        
+        entry = {
             "value": value,
-            "timestamp": time.time()
+            "timestamp": now,
+            "rate": None
         }
+        
+        # Rate Calculation Logic
+        if metric_type == 'counter':
+            prev = self.previous_values.get(node_metric_id)
+            if prev:
+                try:
+                    cur_val = float(value)
+                    prev_val = float(prev['value'])
+                    time_delta = now - prev['timestamp']
+                    
+                    if time_delta > 0:
+                        val_delta = cur_val - prev_val
+                        # Handle Wrap-around (simple 32/64 bit detection or just ignore negative)
+                        if val_delta >= 0:
+                            # Formula for Bytes -> Bits/sec
+                            if unit == 'bytes':
+                                rate = (val_delta * 8) / time_delta
+                            else:
+                                rate = val_delta / time_delta
+                            
+                            entry['rate'] = rate
+                except (ValueError, TypeError):
+                    pass
+            
+            # Update previous value store
+            self.previous_values[node_metric_id] = {
+                "value": value,
+                "timestamp": now
+            }
+            
+        self.current_values[node_metric_id] = entry
         
     def get_current_values(self, node_id: str = None) -> Dict:
         """Get current values, optionally filtered by node"""
         if node_id is None:
             return self.current_values
-        
-        # This is inefficient without a reverse mapping, but fine for small scale
-        # Ideally we'd structure current_values as {node_id: {metric_id: val}}
-        # Or query DB for metric IDs belonging to node
-        # For now, let's trust the caller knows the metric IDs or improve structure later
         return self.current_values
 

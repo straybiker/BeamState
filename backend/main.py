@@ -1,6 +1,17 @@
 import asyncio
 import os
+import sys
 import logging
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("BeamState")
+
+# Fix for Windows: "ValueError: too many file descriptors in select()"
+# Use ProactorEventLoopPolicy which supports I/O Completion Ports (IOCP) and has no 512 limit.
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    logger.info("Using WindowsProactorEventLoopPolicy for IOCP support")
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from database import init_db, SessionLocal

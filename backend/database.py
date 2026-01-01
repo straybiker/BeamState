@@ -6,9 +6,14 @@ import os
 
 # SQLite Database in the data volume
 # Use local path for dev, /app/data for docker (set via env var)
-DB_PATH = os.getenv("DB_PATH", "backend/data/beamstate.db")
+import pathlib
+DEFAULT_DB_PATH = pathlib.Path(__file__).parent / "data" / "beamstate.db"
+DB_PATH = os.getenv("DB_PATH", str(DEFAULT_DB_PATH))
+
 # Ensure directory exists
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+
 
 
 

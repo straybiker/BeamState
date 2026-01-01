@@ -12,18 +12,19 @@ if ($netstatOutput) {
     Write-Host "Found process on port $port, stopping..." -ForegroundColor Yellow
     
     # Extract PID from netstat output
-    $pid = ($netstatOutput -split '\s+')[-1]
+    $procId = ($netstatOutput -split '\s+')[-1]
     
-    if ($pid -match '^\d+$') {
-        $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    if ($procId -match '^\d+$') {
+        $process = Get-Process -Id $procId -ErrorAction SilentlyContinue
         if ($process) {
-            Write-Host "Stopping process: $($process.ProcessName) (PID: $pid)" -ForegroundColor Yellow
-            Stop-Process -Id $pid -Force
+            Write-Host "Stopping process: $($process.ProcessName) (PID: $procId)" -ForegroundColor Yellow
+            Stop-Process -Id $procId -Force
             Start-Sleep -Seconds 2
             Write-Host "Process stopped" -ForegroundColor Green
         }
     }
-} else {
+}
+else {
     Write-Host "Port $port is free" -ForegroundColor Green
 }
 

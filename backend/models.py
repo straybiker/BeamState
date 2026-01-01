@@ -51,6 +51,7 @@ class NodeDB(Base):
 
     group = relationship("GroupDB", back_populates="nodes")
     node_metrics = relationship("NodeMetricDB", back_populates="node", cascade="all, delete-orphan")
+    interfaces = relationship("NodeInterfaceDB", back_populates="node", cascade="all, delete-orphan")
 
 class MetricDefinitionDB(Base):
     __tablename__ = "metric_definitions"
@@ -78,6 +79,21 @@ class NodeMetricDB(Base):
     
     node = relationship("NodeDB", back_populates="node_metrics")
     metric_definition = relationship("MetricDefinitionDB", back_populates="node_metrics")
+
+class NodeInterfaceDB(Base):
+    __tablename__ = "node_interfaces"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    node_id = Column(String, ForeignKey("nodes.id", ondelete="CASCADE"))
+    index = Column(Integer, nullable=False)  # ifIndex
+    name = Column(String, nullable=True)     # ifDescr
+    alias = Column(String, nullable=True)    # ifAlias
+    type = Column(String, nullable=True)     # ifType
+    mac_address = Column(String, nullable=True) # ifPhysAddress
+    admin_status = Column(String, nullable=True) # ifAdminStatus
+    oper_status = Column(String, nullable=True)  # ifOperStatus
+    enabled = Column(Boolean, default=False) # Monitoring enabled
+    
+    node = relationship("NodeDB", back_populates="interfaces")
 
 # Pydantic Models (API)
 class NodeBase(BaseModel):
@@ -166,6 +182,22 @@ class NodeMetricCreate(NodeMetricBase):
     pass
 
 class NodeMetric(NodeMetricBase):
+    id: str
+    class Config:
+        from_attributes = True
+
+class NodeInterfaceBase(BaseModel):
+    node_id: str
+    index: int
+    name: Optional[str] = None
+    alias: Optional[str] = None
+    type: Optional[str] = None
+    mac_address: Optional[str] = None
+    admin_status: Optional[str] = None
+    oper_status: Optional[str] = None
+    enabled: bool = False
+
+class NodeInterface(NodeInterfaceBase):
     id: str
     class Config:
         from_attributes = True

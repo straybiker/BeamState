@@ -1,27 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { Activity, Server, Cpu, Thermometer, ArrowDown, ArrowUp, AlertCircle } from 'lucide-react';
+import { Activity, Server, Cpu, Thermometer, ArrowDown, ArrowUp, AlertCircle, Network } from 'lucide-react';
 
 const MetricsDashboard = () => {
     const [nodes, setNodes] = useState([]);
     const [definitions, setDefinitions] = useState([]);
-    const [nodeConfigs, setNodeConfigs] = useState({}); // node_id -> [NodeMetric]
-    const [currentValues, setCurrentValues] = useState({}); // metric_id -> {value, timestamp}
+    const [nodeConfigs, setNodeConfigs] = useState({});
+
+    // We need history to calculate rates. { metric_id: { value, timestamp } }
+    // Actually, backend returns { value, timestamp } for current.
+    // To calc rate, we need Previous value.
+    // Let's store `metricHistory` ref: { metric_id: { value, timestamp } } (last known)
+    // But `currentValues` from backend is just the LATEST.
+    // Rate calculation usually requires persistence. 
+    // If backend only gives "Current", we can only calc rate if WE poll frequently and diff against OUR last poll.
+    // Better approach: Backend sends Rate? Or we derive it here. 
+    // Let's derive it here client-side for now.
+
+    const [currentValues, setCurrentValues] = useState({}); // metric_id -> {value, rate, timestamp}
 
     // Initial Load
     useEffect(() => {
         const loadMetadata = async () => {
             try {
-                // Load Definitions
                 const defRes = await api.get('/metrics/definitions');
                 setDefinitions(defRes.data);
 
-                // Load Nodes
+                const groupRes = await api.get('/config/groups');
+                const groups = groupRes.data;
+
                 const nodeRes = await api.get('/config/nodes');
-                const allNodes = nodeRes.data.filter(n => n.monitor_snmp || n.group_monitor_snmp !== false);
+                const allNodes = nodeRes.data.filter(n => {
+                    if (n.monitor_snmp === true) return true;
+                    if (n.monitor_snmp === false) return false;
+                    const group = groups.find(g => g.id === n.group_id);
+                    return group ? group.monitor_snmp : false;
+                });
                 setNodes(allNodes);
 
-                // Load Configs for all relevant nodes
                 const configs = {};
                 await Promise.all(allNodes.map(async (n) => {
                     try {
@@ -37,7 +53,6 @@ const MetricsDashboard = () => {
                 console.error("Failed to load metadata", e);
             }
         };
-
         loadMetadata();
     }, []);
 
@@ -57,6 +72,14 @@ const MetricsDashboard = () => {
         return () => clearInterval(interval);
     }, []);
 
+    const formatBits = (bps) => {
+        if (!bps && bps !== 0) return '-';
+        if (bps >= 1000000000) return `${(bps / 1000000000).toFixed(2)} Gbps`;
+        if (bps >= 1000000) return `${(bps / 1000000).toFixed(2)} Mbps`;
+        if (bps >= 1000) return `${(bps / 1000).toFixed(2)} Kbps`;
+        return `${Math.round(bps)} bps`;
+    };
+
     const formatValue = (val, type, unit) => {
         if (val === undefined || val === null) return '-';
         if (unit === 'bytes') {
@@ -72,12 +95,16 @@ const MetricsDashboard = () => {
         return val;
     };
 
-    // Group metrics by node for display
+    const isTrafficMetric = (name) => {
+        const n = name.toLowerCase();
+        return n.includes('bytes') || n.includes('traffic');
+    };
+
     return (
         <div className="space-y-6">
             <header className="flex items-center justify-between mb-8">
                 <div>
-                    <h2 className="text-3xl font-bold text-slate-100">Metrics Dashboard</h2>
+                    <h2 className="text-3xl font-bold text-slate-100">SNMP Dashboard</h2>
                     <p className="text-slate-400">Real-time SNMP data</p>
                 </div>
             </header>
@@ -85,30 +112,36 @@ const MetricsDashboard = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {nodes.map(node => {
                     const configs = nodeConfigs[node.id] || [];
-                    if (configs.length === 0) return null;
 
-                    // Group metrics 
                     const sysMetrics = configs.filter(c => {
                         const def = definitions.find(d => d.id === c.metric_definition_id);
                         return def && def.category !== 'interface';
                     });
 
-                    const ifMetrics = configs.filter(c => {
+                    // Organize Interface Metrics
+                    const interfaces = {};
+                    configs.forEach(c => {
                         const def = definitions.find(d => d.id === c.metric_definition_id);
-                        return def && def.category === 'interface';
-                    });
+                        if (def && def.category === 'interface') {
+                            if (!interfaces[c.interface_index]) {
+                                interfaces[c.interface_index] = {
+                                    name: c.interface_name || `Idx ${c.interface_index}`,
+                                    trafficIn: null,    // Metric Obj
+                                    trafficOut: null,   // Metric Obj
+                                    other: []
+                                };
+                            }
+                            const ifObj = interfaces[c.interface_index];
+                            const nameLower = def.name.toLowerCase();
 
-                    // Group interfaces
-                    const interfaces = {}; // index -> {name, metrics: []}
-                    ifMetrics.forEach(m => {
-                        const def = definitions.find(d => d.id === m.metric_definition_id);
-                        if (!interfaces[m.interface_index]) {
-                            interfaces[m.interface_index] = {
-                                name: m.interface_name || `Index ${m.interface_index}`,
-                                metrics: []
-                            };
+                            if (nameLower.includes('in') && (nameLower.includes('bytes') || nameLower.includes('traffic'))) {
+                                ifObj.trafficIn = { ...c, def };
+                            } else if (nameLower.includes('out') && (nameLower.includes('bytes') || nameLower.includes('traffic'))) {
+                                ifObj.trafficOut = { ...c, def };
+                            } else {
+                                ifObj.other.push({ ...c, def });
+                            }
                         }
-                        interfaces[m.interface_index].metrics.push({ ...m, def });
                     });
 
                     return (
@@ -124,12 +157,11 @@ const MetricsDashboard = () => {
                             <div className="p-4 space-y-4 flex-1">
                                 {/* System Metrics */}
                                 {sysMetrics.length > 0 && (
-                                    <div className="grid grid-cols-2 gap-3">
+                                    <div className="grid grid-cols-2 gap-3 pb-2 border-b border-slate-800">
                                         {sysMetrics.map(m => {
                                             const def = definitions.find(d => d.id === m.metric_definition_id);
                                             const data = currentValues[m.id];
                                             const val = data ? data.value : null;
-
                                             let Icon = Activity;
                                             if (def.name.toLowerCase().includes('cpu')) Icon = Cpu;
                                             if (def.name.toLowerCase().includes('temp')) Icon = Thermometer;
@@ -149,41 +181,73 @@ const MetricsDashboard = () => {
                                 )}
 
                                 {/* Interfaces */}
-                                {Object.keys(interfaces).length > 0 && (
-                                    <div className="space-y-3">
-                                        <h4 className="text-xs uppercase font-bold text-slate-500 tracking-wider">Interfaces</h4>
-                                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
-                                            {Object.values(interfaces).map(iface => (
-                                                <div key={iface.name} className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30 text-sm">
-                                                    <div className="font-medium text-slate-300 mb-2 border-b border-slate-700/30 pb-1">
-                                                        {iface.name}
-                                                    </div>
-                                                    <div className="grid grid-cols-2 gap-y-2 gap-x-4">
-                                                        {iface.metrics.map(im => {
-                                                            const data = currentValues[im.id];
-                                                            const val = data ? data.value : null;
+                                {Object.values(interfaces).length > 0 && (
+                                    <div className="space-y-4">
+                                        {Object.values(interfaces).map(iface => {
+                                            // Get Rate from backend
+                                            const rateIn = iface.trafficIn ? currentValues[iface.trafficIn.id]?.rate || 0 : 0;
+                                            const rateOut = iface.trafficOut ? currentValues[iface.trafficOut.id]?.rate || 0 : 0;
+                                            const rateTotal = rateIn + rateOut;
 
-                                                            return (
-                                                                <div key={im.id} className="flex justify-between items-center">
-                                                                    <span className="text-slate-500 text-xs truncate max-w-[60%]">{im.def.name.replace('Interface ', '')}</span>
-                                                                    <span className="text-slate-200 font-mono text-xs">
-                                                                        {formatValue(val, im.def.metric_type, im.def.unit)}
-                                                                    </span>
+                                            // Calculate Total manually if needed, or if backend helps
+                                            // But wait, Total is just In + Out sum. 
+                                            // Backend doesn't have a "Total" metric unless we define one.
+                                            // Summing rates client-side is fine.
+
+                                            const hasTraffic = iface.trafficIn || iface.trafficOut;
+
+                                            return (
+                                                <div key={iface.name} className="bg-slate-900/30 rounded-lg border border-slate-700/30 overflow-hidden">
+                                                    <div className="bg-slate-800/40 px-3 py-2 border-b border-slate-700/30 flex justify-between items-center">
+                                                        <span className="font-medium text-slate-300 text-sm flex items-center">
+                                                            <Network size={14} className="mr-2 text-blue-400" /> {iface.name}
+                                                        </span>
+                                                        {hasTraffic && <span className="text-xs font-mono text-blue-300">{formatBits(rateTotal)}</span>}
+                                                    </div>
+
+                                                    <div className="p-3 space-y-3">
+                                                        {/* Traffic Section */}
+                                                        {hasTraffic && (
+                                                            <div className="grid grid-cols-2 gap-4">
+                                                                <div className="space-y-1">
+                                                                    <div className="text-[10px] uppercase text-slate-500 font-bold flex items-center">
+                                                                        <ArrowDown size={10} className="mr-1" /> In
+                                                                    </div>
+                                                                    <div className="text-base font-mono text-white leading-none">{formatBits(rateIn)}</div>
+                                                                    {/* <div className="text-[10px] text-slate-600 font-mono">Total: {formatValue(currentValues[iface.trafficIn?.id]?.value, 'counter', 'bytes')}</div> */}
                                                                 </div>
-                                                            );
-                                                        })}
+                                                                <div className="space-y-1 text-right">
+                                                                    <div className="text-[10px] uppercase text-slate-500 font-bold flex items-center justify-end">
+                                                                        Out <ArrowUp size={10} className="ml-1" />
+                                                                    </div>
+                                                                    <div className="text-base font-mono text-white leading-none">{formatBits(rateOut)}</div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Other Metrics (Errors, Status etc) */}
+                                                        {iface.other.length > 0 && (
+                                                            <div className={`grid grid-cols-2 gap-2 ${hasTraffic ? 'pt-2 border-t border-slate-700/30' : ''}`}>
+                                                                {iface.other.map(m => {
+                                                                    const val = currentValues[m.id]?.value;
+                                                                    return (
+                                                                        <div key={m.id} className="flex justify-between text-xs">
+                                                                            <span className="text-slate-500 truncate">{m.def.name.replace('Interface ', '')}</span>
+                                                                            <span className="text-slate-300 font-mono">{formatValue(val, m.def.metric_type, m.def.unit)}</span>
+                                                                        </div>
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
-                                            ))}
-                                        </div>
+                                            );
+                                        })}
                                     </div>
                                 )}
 
                                 {sysMetrics.length === 0 && Object.keys(interfaces).length === 0 && (
-                                    <div className="text-center py-8 text-slate-500 text-sm">
-                                        <AlertCircle className="mx-auto mb-2 opacity-50" size={24} />
-                                        No metrics configured.
-                                    </div>
+                                    <div className="text-center py-6 text-slate-500 text-sm">No metrics configured</div>
                                 )}
                             </div>
                         </div>
@@ -191,9 +255,7 @@ const MetricsDashboard = () => {
                 })}
             </div>
             {nodes.length === 0 && (
-                <div className="text-center py-12 text-slate-500">
-                    <p>No SNMP-enabled nodes found.</p>
-                </div>
+                <div className="text-center py-12 text-slate-500">No nodes found.</div>
             )}
         </div>
     );

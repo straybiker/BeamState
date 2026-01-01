@@ -17,13 +17,13 @@ function Stop-PortProcess {
     if ($netstatOutput) {
         Write-Host "[$ServiceName] Found process on port $Port, stopping..." -ForegroundColor Yellow
         
-        $pid = ($netstatOutput -split '\s+')[-1]
+        $procId = ($netstatOutput -split '\s+')[-1]
         
-        if ($pid -match '^\d+$') {
-            $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        if ($procId -match '^\d+$') {
+            $process = Get-Process -Id $procId -ErrorAction SilentlyContinue
             if ($process) {
-                Write-Host "[$ServiceName] Stopping: $($process.ProcessName) (PID: $pid)" -ForegroundColor Yellow
-                Stop-Process -Id $pid -Force
+                Write-Host "[$ServiceName] Stopping: $($process.ProcessName) (PID: $procId)" -ForegroundColor Yellow
+                Stop-Process -Id $procId -Force
                 Start-Sleep -Seconds 1
                 Write-Host "[$ServiceName] Process stopped" -ForegroundColor Green
             }

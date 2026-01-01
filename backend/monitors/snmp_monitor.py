@@ -12,6 +12,10 @@ logger = logging.getLogger("BeamState.SNMPMonitor")
 class SNMPMonitor(BaseMonitor):
     """SNMP v2c health check monitor"""
     
+    def __init__(self):
+        super().__init__()
+        self.snmp_engine = SnmpEngine()
+    
     # OID for sysUpTime (1.3.6.1.2.1.1.3.0)
     SYS_UPTIME_OID = ObjectIdentity('1.3.6.1.2.1.1.3.0')
     
@@ -73,7 +77,7 @@ class SNMPMonitor(BaseMonitor):
         """
         try:
             iterator = getCmd(
-                SnmpEngine(),
+                self.snmp_engine,
                 CommunityData(community, mpModel=1),  # SNMPv2c
                 UdpTransportTarget((ip, port), timeout=timeout, retries=0),
                 ContextData(),

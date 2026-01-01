@@ -52,7 +52,8 @@ class PingMonitor(BaseMonitor):
         for _ in range(count):
             try:
                 # ping3.ping returns latency in seconds, None on timeout, or False on error
-                latency_sec = ping(ip, timeout=timeout)
+                # Offload blocking call to thread
+                latency_sec = await asyncio.to_thread(ping, ip, timeout=timeout)
                 raw_responses.append(latency_sec)
                 if latency_sec is not None and latency_sec is not False:
                     total_latency += latency_sec * 1000  # to ms

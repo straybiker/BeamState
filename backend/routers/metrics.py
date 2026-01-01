@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 from database import get_db
-from models import MetricDefinition, MetricDefinitionDB, NodeMetric, NodeMetricCreate, NodeMetricDB, NodeDB
+from models import MetricDefinition, MetricDefinitionDB, NodeMetric, NodeMetricCreate, NodeMetricDB, NodeDB, NodeInterface, NodeInterfaceDB, NodeInterfaceBase
 # Note: pysnmp imports are done inside _sync_discover_interfaces to avoid async/sync conflicts
 import uuid
 import logging
@@ -74,38 +74,53 @@ def _sync_discover_interfaces(ip: str, port: int, community: str) -> list:
         ObjectType, ObjectIdentity, nextCmd
     )
     
-    interfaces = []
+    interfaces = {}
     
-    # Create synchronous iterator
-    for errorIndication, errorStatus, errorIndex, varBinds in nextCmd(
-        SnmpEngine(),
-        CommunityData(community, mpModel=1),  # v2c
-        UdpTransportTarget((ip, port), timeout=2.0, retries=1),
-        ContextData(),
-        ObjectType(ObjectIdentity('1.3.6.1.2.1.2.2.1.2')),  # ifDescr
-        lexicographicMode=False  # Stop when leaving the tree
-    ):
-        if errorIndication:
-            raise Exception(f"SNMP Error: {errorIndication}")
-        elif errorStatus:
-            raise Exception(f"SNMP Error: {errorStatus.prettyPrint()} at {errorIndex}")
-        
-        for varBind in varBinds:
-            oid = varBind[0]
-            val = varBind[1]
+    # helper to fetch a column
+    def fetch_column(oid_base, key_name):
+        for errorIndication, errorStatus, errorIndex, varBinds in nextCmd(
+            SnmpEngine(),
+            CommunityData(community, mpModel=1),  # v2c
+            UdpTransportTarget((ip, port), timeout=2.0, retries=1),
+            ContextData(),
+            ObjectType(ObjectIdentity(oid_base)),
+            lexicographicMode=False
+        ):
+            if errorIndication or errorStatus:
+                continue # Skip errors for secondary columns to be safe
             
-            # Extract index (last part of OID)
-            try:
-                idx = int(oid[-1])
-                name = val.prettyPrint()
-                interfaces.append({"index": idx, "name": name})
-            except Exception as e:
-                pass  # Skip unparseable entries
+            for varBind in varBinds:
+                oid = varBind[0]
+                val = varBind[1]
+                try:
+                    idx = int(oid[-1])
+                    if idx not in interfaces:
+                        interfaces[idx] = {"index": idx}
+                    interfaces[idx][key_name] = val.prettyPrint()
+                except:
+                    pass
+
+    # 1. Fetch ifDescr (Base)
+    fetch_column('1.3.6.1.2.1.2.2.1.2', 'name')
     
-    return sorted(interfaces, key=lambda x: x["index"])
+    # 2. Fetch ifType
+    fetch_column('1.3.6.1.2.1.2.2.1.3', 'type')
+    
+    # 3. Fetch ifPhysAddress
+    fetch_column('1.3.6.1.2.1.2.2.1.6', 'mac_address')
+    
+    # 4. Fetch ifAdminStatus
+    fetch_column('1.3.6.1.2.1.2.2.1.7', 'admin_status')
+    
+    # 5. Fetch ifOperStatus
+    fetch_column('1.3.6.1.2.1.2.2.1.8', 'oper_status')
+    
+    # Convert dict to list
+    result_list = sorted(interfaces.values(), key=lambda x: x["index"])
+    return result_list
 
 
-@router.get("/discover-interfaces/{node_id}")
+@router.get("/discover-interfaces/{node_id}", response_model=List[NodeInterface])
 async def discover_interfaces(node_id: str, db: Session = Depends(get_db)):
     """Perform SNMP walk to discover interfaces on a node"""
     print(f"=== DISCOVERY ENDPOINT HIT: {node_id} ===")
@@ -137,7 +152,51 @@ async def discover_interfaces(node_id: str, db: Session = Depends(get_db)):
             node.ip, port, community
         )
         print(f"=== DISCOVERY SUCCESS: {len(interfaces)} interfaces ===")
-        return interfaces
+        
+        # Persist interfaces to DB
+        # 1. Get existing interfaces
+        existing_interfaces = db.query(NodeInterfaceDB).filter(NodeInterfaceDB.node_id == node_id).all()
+        existing_map = {i.index: i for i in existing_interfaces}
+        
+        saved_interfaces = []
+        
+        for iface_data in interfaces:
+            idx = iface_data["index"]
+            name = iface_data.get("name")
+            if_type = iface_data.get("type")
+            mac = iface_data.get("mac_address")
+            admin_status = iface_data.get("admin_status")
+            oper_status = iface_data.get("oper_status")
+
+
+            if idx in existing_map:
+                # Update existing
+                db_iface = existing_map[idx]
+                db_iface.name = name
+                db_iface.type = if_type
+                db_iface.mac_address = mac
+                db_iface.admin_status = admin_status
+                db_iface.oper_status = oper_status
+                saved_interfaces.append(db_iface)
+            else:
+                # Create new
+                new_iface = NodeInterfaceDB(
+                    node_id=node_id,
+                    index=idx,
+                    name=name,
+                    type=if_type,
+                    mac_address=mac,
+                    admin_status=admin_status,
+                    oper_status=oper_status,
+                    enabled=False # User must manually enable
+                )
+                db.add(new_iface)
+                saved_interfaces.append(new_iface)
+        
+        db.commit()
+        
+        return saved_interfaces
+        
     except HTTPException:
         raise
     except Exception as e:
@@ -146,6 +205,45 @@ async def discover_interfaces(node_id: str, db: Session = Depends(get_db)):
         traceback.print_exc()
         logger.error(f"Discovery failed: {e}")
         raise HTTPException(status_code=500, detail=f"Discovery failed: {e}")
+
+@router.get("/interfaces/{node_id}", response_model=List[NodeInterface])
+def read_node_interfaces(node_id: str, db: Session = Depends(get_db)):
+    """Get stored interfaces for a node"""
+    return db.query(NodeInterfaceDB).filter(NodeInterfaceDB.node_id == node_id).order_by(NodeInterfaceDB.index).all()
+
+@router.post("/interfaces/{node_id}/config")
+def update_interface_config(node_id: str, config: List[NodeInterfaceBase], db: Session = Depends(get_db)):
+    """Update interface configuration (enable/disable monitoring)"""
+    
+    # Verify node exists
+    node = db.query(NodeDB).filter(NodeDB.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+        
+    logger.info(f"Processing interface config update for {node_id}")
+    
+    for cfg in config:
+        # Find interface
+        iface = db.query(NodeInterfaceDB).filter(
+            NodeInterfaceDB.node_id == node_id,
+            NodeInterfaceDB.index == cfg.index
+        ).first()
+        
+        if iface:
+            # Update Interface State
+            iface.enabled = cfg.enabled
+            iface.alias = cfg.alias
+            
+
+    try:
+        db.commit()
+        logger.info("Interface config committed successfully")
+    except Exception as e:
+        logger.error(f"Failed to commit interface config: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return db.query(NodeInterfaceDB).filter(NodeInterfaceDB.node_id == node_id).order_by(NodeInterfaceDB.index).all()
 
 # --- DATA RETRIEVAL ---
 

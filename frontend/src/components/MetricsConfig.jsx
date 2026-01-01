@@ -1,33 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { Save, RefreshCw, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { Save, RefreshCw, Check, AlertCircle, Loader2, Network, Activity, ChevronRight, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const MetricsConfig = ({ nodes, groups = [] }) => {
     const [selectedNodeId, setSelectedNodeId] = useState('');
     const [interfaces, setInterfaces] = useState([]);
     const [definitions, setDefinitions] = useState([]);
-    const [nodeMetrics, setNodeMetrics] = useState([]); // Currently saved metrics
 
-    // UI Selection State
+    // Unified configuration state: List of metric objects { metric_definition_id, interface_index, ... }
+    const [localConfig, setLocalConfig] = useState([]);
+
     const [loadingInterfaces, setLoadingInterfaces] = useState(false);
+    const [scanning, setScanning] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [expandedInterfaces, setExpandedInterfaces] = useState(new Set());
 
-    // Staging state for new configuration
-    const [selectedSystemMetrics, setSelectedSystemMetrics] = useState(new Set());
-    const [selectedInterfaceMetrics, setSelectedInterfaceMetrics] = useState(new Set());
-    const [selectedInterfaces, setSelectedInterfaces] = useState(new Set());
-
-    // Filter nodes specific to SNMP
     const snmpNodes = nodes.filter(n => {
         if (n.monitor_snmp === true) return true;
         if (n.monitor_snmp === false) return false;
-        // Fallback to group
         const group = groups.find(g => g.id === n.group_id);
         return group ? group.monitor_snmp : false;
     });
 
-    // Load metric definitions on mount
     useEffect(() => {
         const loadDefinitions = async () => {
             try {
@@ -41,158 +36,135 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
         loadDefinitions();
     }, []);
 
-    // Load node details when selected
     useEffect(() => {
         if (!selectedNodeId) {
             setInterfaces([]);
-            setNodeMetrics([]);
-            setSelectedSystemMetrics(new Set());
-            setSelectedInterfaceMetrics(new Set());
-            setSelectedInterfaces(new Set());
+            setLocalConfig([]);
             return;
         }
-
-        loadNodeConfiguration(selectedNodeId);
+        loadNodeData(selectedNodeId);
     }, [selectedNodeId]);
 
-    const loadNodeConfiguration = async (nodeId) => {
+    const loadNodeData = async (nodeId) => {
+        setLoadingInterfaces(true);
         try {
-            // Load existing configured metrics
-            const res = await api.get(`/metrics/nodes/${nodeId}`);
-            const metrics = res.data;
-            setNodeMetrics(metrics);
+            // Load Interfaces
+            const ifRes = await api.get(`/metrics/interfaces/${nodeId}`);
+            setInterfaces(ifRes.data);
 
-            // Populate selection state from existing config
-            const sysMetrics = new Set();
-            const ifMetrics = new Set();
-            const ifaces = new Set();
-
-            metrics.forEach(m => {
-                const def = definitions.find(d => d.id === m.metric_definition_id);
-                if (!def) return;
-
-                if (def.category === 'interface') {
-                    ifMetrics.add(def.id);
-                    if (m.interface_index) {
-                        // Store detailed interface info if possible, but for Set we just store index
-                        ifaces.add(m.interface_index);
-                    }
-                } else {
-                    sysMetrics.add(def.id);
-                }
-            });
-
-            setSelectedSystemMetrics(sysMetrics);
-            setSelectedInterfaceMetrics(ifMetrics);
-            setSelectedInterfaces(ifaces);
+            // Load Configured Metrics
+            const configRes = await api.get(`/metrics/nodes/${nodeId}`);
+            setLocalConfig(configRes.data);
 
         } catch (e) {
             console.error(e);
             toast.error("Failed to load node configuration");
-        }
-    };
-
-    const handleDiscoverInterfaces = async () => {
-        if (!selectedNodeId) return;
-        setLoadingInterfaces(true);
-        try {
-            const res = await api.get(`/metrics/discover-interfaces/${selectedNodeId}`);
-            setInterfaces(res.data);
-            toast.success(`Found ${res.data.length} interfaces`);
-        } catch (err) {
-            console.error(err);
-            let message = "Discovery failed. Check SNMP settings.";
-            if (err.response?.data?.detail) {
-                message = `Error: ${err.response.data.detail}`;
-            }
-            toast.error(message);
         } finally {
             setLoadingInterfaces(false);
         }
     };
 
-    const handleSave = async () => {
+    const handleScanInterfaces = async () => {
         if (!selectedNodeId) return;
-        setSaving(true);
-
+        setScanning(true);
         try {
-            const payload = [];
+            const res = await api.get(`/metrics/discover-interfaces/${selectedNodeId}`);
+            setInterfaces(res.data);
+            toast.success(`Scan complete. Found ${res.data.length} interfaces.`);
+        } catch (err) {
+            console.error(err);
+            toast.error("Scan failed. Check SNMP settings.");
+        } finally {
+            setScanning(false);
+        }
+    };
 
-            // System Metrics
-            selectedSystemMetrics.forEach(defId => {
-                payload.push({
-                    node_id: selectedNodeId,
-                    metric_definition_id: defId,
-                    collection_interval: 60, // Default for now
-                    enabled: true
-                });
+    const toggleExpand = (index) => {
+        const newSet = new Set(expandedInterfaces);
+        if (newSet.has(index)) newSet.delete(index);
+        else newSet.add(index);
+        setExpandedInterfaces(newSet);
+    };
+
+    const isMetricEnabled = (defId, ifaceIndex = null) => {
+        return localConfig.some(m =>
+            m.metric_definition_id === defId &&
+            m.interface_index === ifaceIndex &&
+            m.enabled
+        );
+    };
+
+    const handleToggleMetric = async (defId, ifaceIndex = null, ifaceName = null) => {
+        if (!selectedNodeId) return;
+
+        // Clone current config
+        let newConfig = [...localConfig];
+        const existingIdx = newConfig.findIndex(m =>
+            m.metric_definition_id === defId &&
+            m.interface_index === ifaceIndex
+        );
+
+        if (existingIdx >= 0) {
+            // Remove (Toggle Off)
+            newConfig.splice(existingIdx, 1);
+        } else {
+            // Add (Toggle On)
+            newConfig.push({
+                node_id: selectedNodeId,
+                metric_definition_id: defId,
+                interface_index: ifaceIndex,
+                interface_name: ifaceName,
+                collection_interval: 60,
+                enabled: true
             });
+        }
 
-            // Interface Metrics
-            // Must apply every selected interface metric to every selected interface
-            if (selectedInterfaceMetrics.size > 0 && selectedInterfaces.size > 0) {
-                selectedInterfaceMetrics.forEach(defId => {
-                    selectedInterfaces.forEach(ifIndex => {
-                        // Find interface name from discovery list if available
-                        const iface = interfaces.find(i => i.index === ifIndex);
-                        const ifName = iface ? iface.name : `Index ${ifIndex}`;
+        // Optimistic Update
+        setLocalConfig(newConfig);
 
-                        payload.push({
-                            node_id: selectedNodeId,
-                            metric_definition_id: defId,
-                            interface_index: ifIndex,
-                            interface_name: ifName,
-                            collection_interval: 60,
-                            enabled: true
-                        })
-                    });
-                });
-            }
+        // Save
+        setSaving(true);
+        try {
+            // Filter out internal fields before sending 'Create' payloads if needed?
+            // The API expects NodeMetricCreate schemas.
+            // Our local config has DB fields (id, created_at) which API ignores or handles.
+            // We should map to clean objects.
+            const payload = newConfig.map(c => ({
+                node_id: selectedNodeId,
+                metric_definition_id: c.metric_definition_id,
+                interface_index: c.interface_index,
+                interface_name: c.interface_name,
+                collection_interval: c.collection_interval || 60,
+                enabled: true
+            }));
 
             await api.post(`/metrics/nodes/${selectedNodeId}`, payload);
-            toast.success("Metrics configuration saved");
-
-            // Reload to confirm
-            loadNodeConfiguration(selectedNodeId);
-
+            // Don't toast on every click, too noisy. Maybe a small indicator?
         } catch (e) {
             console.error(e);
             toast.error("Failed to save configuration");
+            // Revert on error? For now rely on reload or retry.
         } finally {
             setSaving(false);
         }
     };
 
-    // Helper to toggle set items
-    const toggleSet = (setObj, updateFunc, item) => {
-        const newSet = new Set(setObj);
-        if (newSet.has(item)) newSet.delete(item);
-        else newSet.add(item);
-        updateFunc(newSet);
-    };
-
-    const toggleAllInterfaces = () => {
-        if (selectedInterfaces.size === interfaces.length) {
-            setSelectedInterfaces(new Set());
-        } else {
-            setSelectedInterfaces(new Set(interfaces.map(i => i.index)));
-        }
-    };
-
-    const sysDefs = definitions.filter(d => d.category !== 'interface');
-    const ifDefs = definitions.filter(d => d.category === 'interface');
+    // Derived Lists
+    const interfaceDefs = definitions.filter(d => d.category === 'interface');
+    const systemDefs = definitions.filter(d => d.category !== 'interface');
 
     return (
         <div className="bg-surface p-6 rounded-xl border border-slate-700 shadow-sm space-y-6">
-            <h3 className="text-xl font-semibold text-slate-100 flex items-center">
-                SNMP Metrics Configuration
+            <h3 className="text-xl font-semibold text-slate-100 flex items-center justify-between">
+                <span>SNMP Metrics Configuration</span>
+                {saving && <span className="text-xs text-blue-400 flex items-center"><Loader2 size={12} className="animate-spin mr-1" /> Saving...</span>}
             </h3>
 
-            {/* 1. Select Node */}
+            {/* Node Select */}
             <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">Select Node to Configure</label>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Select Node</label>
                 <select
-                    className="w-full md:w-1/2 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                    className="w-full md:w-1/2 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white outline-none focus:border-primary"
                     value={selectedNodeId}
                     onChange={e => setSelectedNodeId(e.target.value)}
                 >
@@ -201,126 +173,149 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                         <option key={n.id} value={n.id}>{n.name} ({n.ip})</option>
                     ))}
                 </select>
-                <p className="text-xs text-slate-500 mt-1">Only nodes with SNMP enabled are shown.</p>
             </div>
 
             {selectedNodeId && (
-                <div className="animate-in fade-in duration-300 space-y-8">
-                    <hr className="border-slate-700" />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in">
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        {/* LEFT COL: Discovery & Interfaces */}
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                                <h4 className="text-lg font-medium text-slate-200">1. Interfaces</h4>
-                                <button
-                                    onClick={handleDiscoverInterfaces}
-                                    disabled={loadingInterfaces}
-                                    className="text-primary hover:text-blue-300 text-sm flex items-center bg-blue-500/10 px-3 py-1.5 rounded-md transition-colors"
-                                >
-                                    {loadingInterfaces ? <Loader2 size={16} className="animate-spin mr-2" /> : <RefreshCw size={16} className="mr-2" />}
-                                    Discover Interfaces
-                                </button>
-                            </div>
+                    {/* INTERFACES COLUMN */}
+                    <div className="lg:col-span-2 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h4 className="text-lg font-medium text-slate-200 flex items-center gap-2">
+                                <Network size={20} className="text-blue-400" /> Interfaces
+                            </h4>
+                            <button
+                                onClick={handleScanInterfaces}
+                                disabled={scanning}
+                                className="text-primary hover:text-blue-300 text-sm flex items-center bg-blue-500/10 px-3 py-1.5 rounded-md transition-colors"
+                            >
+                                {scanning ? <Loader2 size={16} className="animate-spin mr-2" /> : <RefreshCw size={16} className="mr-2" />}
+                                {scanning ? "Scanning..." : "Scan Interfaces"}
+                            </button>
+                        </div>
 
-                            <div className="bg-slate-900/50 rounded-lg border border-slate-700/50 p-4 max-h-[400px] overflow-y-auto">
-                                {interfaces.length > 0 ? (
-                                    <div className="space-y-2">
-                                        <div className="flex items-center pb-2 border-b border-slate-700/50">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedInterfaces.size === interfaces.length}
-                                                onChange={toggleAllInterfaces}
-                                                className="rounded bg-slate-800 border-slate-600 text-primary mr-3"
-                                            />
-                                            <span className="text-sm font-medium text-slate-300">Select All ({interfaces.length})</span>
+                        <div className="bg-slate-900/50 rounded-lg border border-slate-700/50 overflow-hidden">
+                            {loadingInterfaces ? (
+                                <div className="p-8 text-center text-slate-500">Loading...</div>
+                            ) : interfaces.length > 0 ? (
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-slate-800/50 text-slate-400 border-b border-slate-700/50">
+                                        <tr>
+                                            <th className="px-4 py-3 w-10"></th>
+                                            <th className="px-4 py-3">Index</th>
+                                            <th className="px-4 py-3">Name</th>
+                                            <th className="px-4 py-3">Status</th>
+                                            <th className="px-4 py-3">Active Metrics</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-700/50">
+                                        {interfaces.map(iface => {
+                                            const isExpanded = expandedInterfaces.has(iface.index);
+                                            // Count active metrics for summary
+                                            const activeCount = localConfig.filter(m => m.interface_index === iface.index).length;
+
+                                            // Auto-expand if active metrics exist (optional UX choice, keeping manual for now or auto on load?)
+                                            // Let's keep manual expansion, but highlight row if active.
+
+                                            return (
+                                                <React.Fragment key={iface.index}>
+                                                    <tr
+                                                        className={`hover:bg-slate-800/30 transition-colors cursor-pointer ${activeCount > 0 ? 'bg-blue-900/10' : ''}`}
+                                                        onClick={() => toggleExpand(iface.index)}
+                                                    >
+                                                        <td className="px-4 py-3 text-slate-500">
+                                                            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                                        </td>
+                                                        <td className="px-4 py-3 font-mono text-slate-500">{iface.index}</td>
+                                                        <td className="px-4 py-3 font-medium text-slate-200">
+                                                            {iface.name} <span className="text-slate-500 font-normal ml-2">{iface.alias}</span>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            {/* Status Badges */}
+                                                            {String(iface.admin_status) === '1' || String(iface.admin_status) === 'up' ?
+                                                                <span className="text-xs text-green-400">UP</span> :
+                                                                <span className="text-xs text-red-500">DOWN</span>
+                                                            }
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            {activeCount > 0 ? (
+                                                                <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">{activeCount}</span>
+                                                            ) : (
+                                                                <span className="text-slate-600">-</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+
+                                                    {isExpanded && (
+                                                        <tr className="bg-slate-900/80">
+                                                            <td colSpan={5} className="px-4 py-4 border-l-2 border-blue-500/50">
+                                                                <div className="pl-4">
+                                                                    <h5 className="text-xs uppercase text-slate-500 font-bold mb-3 tracking-wider">Available Metrics</h5>
+                                                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                                                        {interfaceDefs.map(def => {
+                                                                            const isChecked = isMetricEnabled(def.id, iface.index);
+                                                                            return (
+                                                                                <label key={def.id} className="flex items-center space-x-2 cursor-pointer group">
+                                                                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isChecked ? 'bg-blue-500 border-blue-500' : 'border-slate-600 group-hover:border-slate-500'}`}>
+                                                                                        {isChecked && <Check size={10} className="text-white" />}
+                                                                                    </div>
+                                                                                    <input
+                                                                                        type="checkbox"
+                                                                                        className="hidden"
+                                                                                        checked={isChecked}
+                                                                                        onChange={() => handleToggleMetric(def.id, iface.index, iface.name)}
+                                                                                    />
+                                                                                    <span className={`text-sm ${isChecked ? 'text-white' : 'text-slate-400 group-hover:text-slate-300'}`}>
+                                                                                        {def.name.replace('Interface ', '')}
+                                                                                    </span>
+                                                                                </label>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    )}
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <div className="text-center py-12 text-slate-500">No interfaces found. Scan to discover.</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* SYSTEM METRICS COLUMN */}
+                    <div>
+                        <h4 className="text-lg font-medium text-slate-200 mb-3 flex items-center gap-2">
+                            <Activity size={20} className="text-purple-400" /> System Metrics
+                        </h4>
+                        <div className="bg-slate-900/30 rounded-lg p-1 border border-slate-700/30 space-y-0.5">
+                            {systemDefs.map(def => {
+                                const isChecked = isMetricEnabled(def.id);
+                                return (
+                                    <label key={def.id} className="flex items-center p-3 hover:bg-slate-800/50 rounded-md cursor-pointer transition-colors group">
+                                        <div className={`w-4 h-4 rounded border flex items-center justify-center mr-3 transition-colors ${isChecked ? 'bg-purple-500 border-purple-500' : 'border-slate-600'}`}>
+                                            {isChecked && <Check size={10} className="text-white" />}
                                         </div>
-                                        {interfaces.map(iface => (
-                                            <label key={iface.index} className="flex items-center p-2 hover:bg-slate-800/50 rounded cursor-pointer transition-colors">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedInterfaces.has(iface.index)}
-                                                    onChange={() => toggleSet(selectedInterfaces, setSelectedInterfaces, iface.index)}
-                                                    className="rounded bg-slate-800 border-slate-600 text-primary mr-3"
-                                                />
-                                                <span className="text-sm text-slate-300 flex-1">{iface.name}</span>
-                                                <span className="text-xs text-slate-500 font-mono">Idx: {iface.index}</span>
-                                            </label>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="text-center py-8 text-slate-500">
-                                        <AlertCircle className="mx-auto mb-2 opacity-50" />
-                                        <p>No interfaces found yet.</p>
-                                        <p className="text-xs">Click "Discover" to scan device.</p>
-                                        {selectedInterfaces.size > 0 && (
-                                            <p className="mt-4 text-orange-400 text-xs text-left px-4">
-                                                Note: {selectedInterfaces.size} interfaces are currently configured but not shown because discovery hasn't been run. They will be preserved on save.
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* RIGHT COL: Metrics Selection */}
-                        <div className="space-y-6">
-                            {/* Interface Metrics */}
-                            <div>
-                                <h4 className="text-lg font-medium text-slate-200 mb-3">2. Interface Metrics</h4>
-                                <p className="text-xs text-slate-400 mb-3">Applied to all selected interfaces.</p>
-                                <div className="space-y-2">
-                                    {ifDefs.map(def => (
-                                        <label key={def.id} className="flex items-center p-3 bg-slate-800/30 border border-slate-700/50 rounded-lg cursor-pointer hover:bg-slate-800/50 transition-colors">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedInterfaceMetrics.has(def.id)}
-                                                onChange={() => toggleSet(selectedInterfaceMetrics, setSelectedInterfaceMetrics, def.id)}
-                                                className="w-4 h-4 rounded bg-slate-800 border-slate-600 text-primary mr-3"
-                                            />
-                                            <div>
-                                                <div className="text-sm font-medium text-slate-200">{def.name}</div>
-                                                <div className="text-xs text-slate-500">OID: {def.oid_template}</div>
-                                            </div>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* System Metrics */}
-                            <div>
-                                <h4 className="text-lg font-medium text-slate-200 mb-3">3. System Metrics</h4>
-                                <div className="space-y-2">
-                                    {sysDefs.map(def => (
-                                        <label key={def.id} className="flex items-center p-3 bg-slate-800/30 border border-slate-700/50 rounded-lg cursor-pointer hover:bg-slate-800/50 transition-colors">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedSystemMetrics.has(def.id)}
-                                                onChange={() => toggleSet(selectedSystemMetrics, setSelectedSystemMetrics, def.id)}
-                                                className="w-4 h-4 rounded bg-slate-800 border-slate-600 text-primary mr-3"
-                                            />
-                                            <div>
-                                                <div className="text-sm font-medium text-slate-200">{def.name}</div>
-                                                <div className="text-xs text-slate-500">Device: {def.device_type || 'Generic'}</div>
-                                            </div>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
+                                        <input
+                                            type="checkbox"
+                                            className="hidden"
+                                            checked={isChecked}
+                                            onChange={() => handleToggleMetric(def.id)}
+                                        />
+                                        <div>
+                                            <div className={`text-sm font-medium ${isChecked ? 'text-white' : 'text-slate-300'}`}>{def.name}</div>
+                                            <div className="text-xs text-slate-500">{def.oid_template}</div>
+                                        </div>
+                                    </label>
+                                );
+                            })}
                         </div>
                     </div>
 
-                    {/* Action Bar */}
-                    <div className="flex justify-end pt-6 border-t border-slate-700 sticky bottom-0 bg-surface pb-2">
-                        <button
-                            onClick={handleSave}
-                            disabled={saving}
-                            className="bg-primary hover:bg-blue-600 text-white px-6 py-2 rounded-md shadow-lg shadow-blue-900/20 flex items-center transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {saving ? <Loader2 size={18} className="animate-spin mr-2" /> : <Save size={18} className="mr-2" />}
-                            Save Actions
-                        </button>
-                    </div>
                 </div>
             )}
         </div>
