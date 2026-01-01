@@ -58,6 +58,10 @@ def sync_with_config(db: Session):
         group.packet_count = g_data.get("packet_count", 1)
         group.max_retries = g_data.get("max_retries", 4)
         group.enabled = g_data.get("enabled", True)
+        group.monitor_ping = g_data.get("monitor_ping", True)
+        group.monitor_snmp = g_data.get("monitor_snmp", False)
+        group.snmp_community = g_data.get("snmp_community", "public")
+        group.snmp_port = g_data.get("snmp_port", 161)
         valid_group_ids.append(group_id)
         db.flush() # Ensure group exists for FKs
 
@@ -84,6 +88,10 @@ def sync_with_config(db: Session):
             node.interval = n_data.get("interval")
             node.packet_count = n_data.get("packet_count")
             node.enabled = n_data.get("enabled", True)
+            node.monitor_ping = n_data.get("monitor_ping")
+            node.monitor_snmp = n_data.get("monitor_snmp")
+            node.snmp_community = n_data.get("snmp_community")
+            node.snmp_port = n_data.get("snmp_port")
             valid_node_ids.append(node_id)
 
     db.commit()

@@ -38,7 +38,11 @@ def save_config(db: Session):
                     "interval": node.interval,
                     "packet_count": node.packet_count,
                     "max_retries": node.max_retries,
-                    "enabled": node.enabled
+                    "enabled": node.enabled,
+                    "monitor_ping": node.monitor_ping,
+                    "monitor_snmp": node.monitor_snmp,
+                    "snmp_community": node.snmp_community,
+                    "snmp_port": node.snmp_port
                 }
                 group_data["nodes"].append(node_data)
             

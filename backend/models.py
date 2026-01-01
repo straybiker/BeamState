@@ -17,6 +17,14 @@ class GroupDB(Base):
     packet_count = Column(Integer, default=1) # Number of packets to send
     max_retries = Column(Integer, default=4) # Number of retries before marking DOWN
     enabled = Column(Boolean, default=True)
+    
+    # Monitoring protocols
+    monitor_ping = Column(Boolean, default=True)
+    monitor_snmp = Column(Boolean, default=False)
+    
+    # SNMP settings
+    snmp_community = Column(String, default="public")
+    snmp_port = Column(Integer, default=161)
 
     nodes = relationship("NodeDB", back_populates="group", cascade="all, delete-orphan")
 
@@ -32,8 +40,44 @@ class NodeDB(Base):
     packet_count = Column(Integer, nullable=True)
     max_retries = Column(Integer, nullable=True)
     enabled = Column(Boolean, default=True)
+    
+    # Monitoring protocol overrides
+    monitor_ping = Column(Boolean, nullable=True)
+    monitor_snmp = Column(Boolean, nullable=True)
+    
+    # SNMP overrides
+    snmp_community = Column(String, nullable=True)
+    snmp_port = Column(Integer, nullable=True)
 
     group = relationship("GroupDB", back_populates="nodes")
+    node_metrics = relationship("NodeMetricDB", back_populates="node", cascade="all, delete-orphan")
+
+class MetricDefinitionDB(Base):
+    __tablename__ = "metric_definitions"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False)  # e.g., "Interface Traffic In"
+    oid_template = Column(String, nullable=False)  # e.g., "1.3.6.1.2.1.2.2.1.10.{index}"
+    metric_type = Column(String, nullable=False)  # "counter", "gauge", "string"
+    unit = Column(String, nullable=True)  # "bytes", "percent", "celsius"
+    category = Column(String, nullable=True)  # "interface", "system", "poe"
+    device_type = Column(String, nullable=True)  # "unifi_switch", "unifi_ap", "generic"
+    requires_index = Column(Boolean, default=False)  # True if OID needs interface index
+    enabled = Column(Boolean, default=True)
+    
+    node_metrics = relationship("NodeMetricDB", back_populates="metric_definition")
+
+class NodeMetricDB(Base):
+    __tablename__ = "node_metrics"
+    id = Column(String, primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    node_id = Column(String, ForeignKey("nodes.id", ondelete="CASCADE"))
+    metric_definition_id = Column(String, ForeignKey("metric_definitions.id"))
+    interface_index = Column(Integer, nullable=True)  # For per-interface metrics
+    interface_name = Column(String, nullable=True)  # e.g., "eth0", "port1"
+    collection_interval = Column(Integer, default=60)  # Seconds
+    enabled = Column(Boolean, default=True)
+    
+    node = relationship("NodeDB", back_populates="node_metrics")
+    metric_definition = relationship("MetricDefinitionDB", back_populates="node_metrics")
 
 # Pydantic Models (API)
 class NodeBase(BaseModel):
@@ -44,6 +88,10 @@ class NodeBase(BaseModel):
     packet_count: Optional[int] = None
     max_retries: Optional[int] = None
     enabled: bool = True
+    monitor_ping: Optional[bool] = None
+    monitor_snmp: Optional[bool] = None
+    snmp_community: Optional[str] = None
+    snmp_port: Optional[int] = None
     
     @field_validator('ip')
     @classmethod
@@ -73,6 +121,10 @@ class GroupBase(BaseModel):
     packet_count: int = 1
     max_retries: int = 4
     enabled: bool = True
+    monitor_ping: bool = True
+    monitor_snmp: bool = False
+    snmp_community: str = "public"
+    snmp_port: int = 161
 
 class GroupCreate(GroupBase):
     pass
@@ -83,4 +135,37 @@ class Group(GroupBase):
     class Config:
         from_attributes = True
 
+# Pydantic models for Metric Definitions and Node Metrics
+class MetricDefinitionBase(BaseModel):
+    name: str
+    oid_template: str
+    metric_type: str  # "counter", "gauge", "string"
+    unit: Optional[str] = None
+    category: Optional[str] = None
+    device_type: Optional[str] = None
+    requires_index: bool = False
+    enabled: bool = True
 
+class MetricDefinitionCreate(MetricDefinitionBase):
+    pass
+
+class MetricDefinition(MetricDefinitionBase):
+    id: str
+    class Config:
+        from_attributes = True
+
+class NodeMetricBase(BaseModel):
+    node_id: str
+    metric_definition_id: str
+    interface_index: Optional[int] = None
+    interface_name: Optional[str] = None
+    collection_interval: int = 60
+    enabled: bool = True
+
+class NodeMetricCreate(NodeMetricBase):
+    pass
+
+class NodeMetric(NodeMetricBase):
+    id: str
+    class Config:
+        from_attributes = True

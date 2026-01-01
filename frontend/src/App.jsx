@@ -4,12 +4,15 @@ import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import Config from './components/Config';
 
+import MetricsDashboard from './components/MetricsDashboard';
+
 function App() {
   return (
     <Router>
       <Layout>
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/metrics" element={<MetricsDashboard />} />
           <Route path="/config" element={<Config />} />
         </Routes>
       </Layout>

@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from database import init_db, SessionLocal
-from node_pinger import Pinger
+from monitor_manager import MonitorManager
 from routers import config
 from cleanup import sync_with_config
 
@@ -12,8 +12,8 @@ from cleanup import sync_with_config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BeamState")
 
-# Initialize Pinger
-pinger = Pinger()
+# Initialize Monitor Manager
+pinger = MonitorManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,6 +28,13 @@ async def lifespan(app: FastAPI):
         db.close()
     except Exception as e:
         logger.error(f"Startup sync failed: {e}")
+    
+    # Seed metric definitions
+    try:
+        from seed_metrics import seed_metric_definitions
+        seed_metric_definitions()
+    except Exception as e:
+        logger.error(f"Metric seeding failed: {e}")
     
     # Start the pinger background task
     # Start the pinger background task
@@ -55,8 +62,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Routers
+from routers import config, metrics
+
+# Include Routers (prefixes are defined in the router modules themselves)
 app.include_router(config.router)
+app.include_router(metrics.router)
 
 
 
@@ -68,3 +78,4 @@ def read_root():
 @app.get("/status")
 def get_pinger_status():
     return pinger.get_status()
+# Forced reload timestamp: 12/31/2025 16:18:20

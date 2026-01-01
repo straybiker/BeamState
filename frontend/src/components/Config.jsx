@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import api from '../api';
 import { Plus, Trash2, ArrowUpDown, Play, Pause } from 'lucide-react';
 import toast from 'react-hot-toast';
+import MetricsConfig from './MetricsConfig';
 
 const Config = () => {
     const [groups, setGroups] = useState([]);
@@ -9,8 +10,24 @@ const Config = () => {
     const [activeTab, setActiveTab] = useState('nodes'); // 'nodes' or 'groups'
 
     // Forms
-    const [newGroup, setNewGroup] = useState({ name: '', interval: 60, packet_count: 1 });
-    const [newNode, setNewNode] = useState({ name: '', ip: '', group_id: '', interval: '', packet_count: '' });
+    const [newGroup, setNewGroup] = useState({
+        name: '',
+        interval: 60,
+        packet_count: 1,
+        snmp_community: 'public',
+        snmp_port: 161
+    });
+    const [newNode, setNewNode] = useState({
+        name: '',
+        ip: '',
+        group_id: '',
+        interval: '',
+        packet_count: '',
+        monitor_ping: true,
+        monitor_snmp: false,
+        snmp_community: '',
+        snmp_port: ''
+    });
 
     const fetchData = async () => {
         try {
@@ -32,7 +49,13 @@ const Config = () => {
         e.preventDefault();
         try {
             await api.post('/config/groups', newGroup);
-            setNewGroup({ name: '', interval: 60, packet_count: 1 });
+            setNewGroup({
+                name: '',
+                interval: 60,
+                packet_count: 1,
+                snmp_community: 'public',
+                snmp_port: 161
+            });
             toast.success("Group created successfully");
             fetchData();
         } catch (err) {
@@ -59,9 +82,21 @@ const Config = () => {
 
             payload.interval = payload.interval ? parseInt(payload.interval) : null;
             payload.packet_count = payload.packet_count ? parseInt(payload.packet_count) : null;
+            payload.snmp_community = payload.snmp_community || null;
+            payload.snmp_port = payload.snmp_port ? parseInt(payload.snmp_port) : null;
 
             await api.post('/config/nodes', payload);
-            setNewNode({ name: '', ip: '', group_id: '', interval: '', packet_count: '' });
+            setNewNode({
+                name: '',
+                ip: '',
+                group_id: '',
+                interval: '',
+                packet_count: '',
+                monitor_ping: true,
+                monitor_snmp: false,
+                snmp_community: '',
+                snmp_port: ''
+            });
             toast.success("Node created successfully");
             fetchData();
         } catch (err) {
@@ -78,27 +113,43 @@ const Config = () => {
         }
     };
 
+    const [deleteConfirm, setDeleteConfirm] = useState({ type: null, id: null });
+
     const handleDeleteNode = async (id) => {
-        if (!confirm("Delete node?")) return;
-        try {
-            await api.delete(`/config/nodes/${id}`);
-            toast.success("Node deleted");
-            fetchData();
-        } catch (e) {
-            toast.error("Failed to delete node");
+        if (deleteConfirm.type === 'node' && deleteConfirm.id === id) {
+            // Confirmed
+            try {
+                await api.delete(`/config/nodes/${id}`);
+                toast.success("Node deleted");
+                setDeleteConfirm({ type: null, id: null });
+                fetchData();
+            } catch (e) {
+                toast.error("Failed to delete node");
+            }
+        } else {
+            // First click
+            setDeleteConfirm({ type: 'node', id });
+            // Auto-reset after 3 seconds
+            setTimeout(() => setDeleteConfirm(prev => prev.id === id ? { type: null, id: null } : prev), 3000);
         }
     };
 
     const handleDeleteGroup = async (id) => {
-        if (!confirm("Delete group and all its nodes?")) return;
-        try {
-            await api.delete(`/config/groups/${id}`);
-            toast.success("Group deleted");
-            fetchData();
-        } catch (e) {
-            toast.error("Failed to delete group");
+        if (deleteConfirm.type === 'group' && deleteConfirm.id === id) {
+            try {
+                await api.delete(`/config/groups/${id}`);
+                toast.success("Group deleted");
+                setDeleteConfirm({ type: null, id: null });
+                fetchData();
+            } catch (e) {
+                toast.error("Failed to delete group");
+            }
+        } else {
+            setDeleteConfirm({ type: 'group', id });
+            setTimeout(() => setDeleteConfirm(prev => prev.id === id ? { type: null, id: null } : prev), 3000);
         }
     };
+
 
     const handleToggleGroup = async (group) => {
         try {
@@ -225,6 +276,10 @@ const Config = () => {
                     onClick={() => setActiveTab('groups')}
                     className={`px-4 py-2 rounded-md transition-all ${activeTab === 'groups' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
                 >Groups</button>
+                <button
+                    onClick={() => setActiveTab('metrics')}
+                    className={`px-4 py-2 rounded-md transition-all ${activeTab === 'metrics' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                >Metrics</button>
             </div>
 
             {activeTab === 'groups' && (
@@ -232,7 +287,7 @@ const Config = () => {
                     <h3 className="text-xl font-semibold text-slate-100">Groups</h3>
 
                     {/* Create Group Form */}
-                    <form onSubmit={handleCreateGroup} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
+                    <form onSubmit={handleCreateGroup} className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
                         <div className="col-span-1 md:col-span-2">
                             <label className="block text-sm font-medium text-slate-400 mb-1">Group Name</label>
                             <input
@@ -243,11 +298,29 @@ const Config = () => {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Ping Interval (s)</label>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Interval (s)</label>
                             <input
                                 type="number"
                                 className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
                                 value={newGroup.interval} onChange={e => setNewGroup({ ...newGroup, interval: parseInt(e.target.value) })}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">SNMP Community</label>
+                            <input
+                                type="text"
+                                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                value={newGroup.snmp_community} onChange={e => setNewGroup({ ...newGroup, snmp_community: e.target.value })}
+                                placeholder="public"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">SNMP Port</label>
+                            <input
+                                type="number"
+                                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                value={newGroup.snmp_port} onChange={e => setNewGroup({ ...newGroup, snmp_port: parseInt(e.target.value) })}
+                                placeholder="161"
                             />
                         </div>
                         <div className="flex justify-end">
@@ -277,10 +350,14 @@ const Config = () => {
                                         <td className="px-4 py-3 font-medium">{g.name}</td>
                                         <td className="px-4 py-3">{g.interval}s</td>
                                         <td className="px-4 py-3 text-right">
-                                            <button onClick={() => handleToggleGroup(g)} className="bg-slate-700/50 hover:bg-slate-700 p-1 rounded transition-colors mr-2" title={g.enabled === false ? "Start Group" : "Pause Group"}>
-                                                {g.enabled === false ? <Play size={18} className="text-green-400" /> : <Pause size={18} className="text-orange-400" />}
-                                            </button>
-                                            <button onClick={() => handleDeleteGroup(g.id)} className="text-red-400 hover:text-red-300 p-1 rounded transition-colors"><Trash2 size={18} /></button>
+                                            <div className="flex items-center justify-end gap-2">
+                                                <button onClick={() => handleToggleGroup(g)} className="bg-slate-700/50 hover:bg-slate-700 p-1 rounded transition-colors" title={g.enabled === false ? "Start Group" : "Pause Group"}>
+                                                    {g.enabled === false ? <Play size={18} className="text-green-400" /> : <Pause size={18} className="text-orange-400" />}
+                                                </button>
+                                                <button onClick={() => handleDeleteGroup(g.id)} className={`${deleteConfirm.type === 'group' && deleteConfirm.id === g.id ? 'bg-red-600 text-white px-2' : 'text-red-400 hover:text-red-300 p-1'} rounded transition-all flex items-center justify-center`}>
+                                                    {deleteConfirm.type === 'group' && deleteConfirm.id === g.id ? <span className="text-xs font-bold">Confirm</span> : <Trash2 size={18} />}
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
@@ -296,47 +373,102 @@ const Config = () => {
                     <h3 className="text-xl font-semibold text-slate-100">Nodes</h3>
 
                     {/* Create Node Form */}
-                    <form onSubmit={handleCreateNode} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
-                        <div className="col-span-1 md:col-span-3">
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Name</label>
-                            <input
-                                type="text" required
-                                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
-                                value={newNode.name} onChange={e => setNewNode({ ...newNode, name: e.target.value })}
-                            />
+                    <form onSubmit={handleCreateNode} className="grid grid-cols-1 gap-4 bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
+                        {/* Basic Info Row */}
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                            <div className="col-span-1 md:col-span-3">
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Name</label>
+                                <input
+                                    type="text" required
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                    value={newNode.name} onChange={e => setNewNode({ ...newNode, name: e.target.value })}
+                                />
+                            </div>
+                            <div className="col-span-1 md:col-span-3">
+                                <label className="block text-sm font-medium text-slate-400 mb-1">IP Address</label>
+                                <input
+                                    type="text" required
+                                    placeholder="192.168.1.1"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                    value={newNode.ip} onChange={e => setNewNode({ ...newNode, ip: e.target.value })}
+                                />
+                            </div>
+                            <div className="col-span-1 md:col-span-3">
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Group</label>
+                                <select
+                                    required
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                    value={newNode.group_id} onChange={e => setNewNode({ ...newNode, group_id: e.target.value })}
+                                >
+                                    <option value="">Select...</option>
+                                    {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="col-span-1 md:col-span-3">
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Interval (Opt)</label>
+                                <input
+                                    type="number"
+                                    placeholder="Def"
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                    value={newNode.interval} onChange={e => setNewNode({ ...newNode, interval: e.target.value })}
+                                />
+                            </div>
                         </div>
-                        <div className="col-span-1 md:col-span-3">
-                            <label className="block text-sm font-medium text-slate-400 mb-1">IP Address</label>
-                            <input
-                                type="text" required
-                                placeholder="192.168.1.1"
-                                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
-                                value={newNode.ip} onChange={e => setNewNode({ ...newNode, ip: e.target.value })}
-                            />
+
+                        {/* Protocol Selection */}
+                        <div className="border-t border-slate-700 pt-4">
+                            <label className="block text-sm font-medium text-slate-400 mb-2">Monitoring Protocols</label>
+                            <div className="flex gap-6">
+                                <label className="flex items-center space-x-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={newNode.monitor_ping}
+                                        onChange={e => setNewNode({ ...newNode, monitor_ping: e.target.checked })}
+                                        className="w-4 h-4 text-primary bg-slate-900 border-slate-700 rounded focus:ring-2 focus:ring-primary"
+                                    />
+                                    <span className="text-white">ICMP Ping</span>
+                                </label>
+                                <label className="flex items-center space-x-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={newNode.monitor_snmp}
+                                        onChange={e => setNewNode({ ...newNode, monitor_snmp: e.target.checked })}
+                                        className="w-4 h-4 text-primary bg-slate-900 border-slate-700 rounded focus:ring-2 focus:ring-primary"
+                                    />
+                                    <span className="text-white">SNMP</span>
+                                </label>
+                            </div>
                         </div>
-                        <div className="col-span-1 md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Group</label>
-                            <select
-                                required
-                                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
-                                value={newNode.group_id} onChange={e => setNewNode({ ...newNode, group_id: e.target.value })}
-                            >
-                                <option value="">Select...</option>
-                                {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                            </select>
-                        </div>
-                        <div className="col-span-1 md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Interval (Opt)</label>
-                            <input
-                                type="number"
-                                placeholder="Def"
-                                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
-                                value={newNode.interval} onChange={e => setNewNode({ ...newNode, interval: e.target.value })}
-                            />
-                        </div>
-                        <div className="col-span-1 md:col-span-2 flex justify-end">
-                            <button type="submit" className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md w-full transition-colors flex items-center justify-center">
-                                <Plus size={18} className="mr-2" /> Add
+
+                        {/* SNMP Override Settings (conditional) */}
+                        {newNode.monitor_snmp && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-400 mb-1">SNMP Community (Override)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                        value={newNode.snmp_community}
+                                        onChange={e => setNewNode({ ...newNode, snmp_community: e.target.value })}
+                                        placeholder="Leave empty to use group default"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-400 mb-1">SNMP Port (Override)</label>
+                                    <input
+                                        type="number"
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                        value={newNode.snmp_port}
+                                        onChange={e => setNewNode({ ...newNode, snmp_port: e.target.value })}
+                                        placeholder="Leave empty to use group default"
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex justify-end">
+                            <button type="submit" className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors flex items-center justify-center">
+                                <Plus size={18} className="mr-2" /> Add Node
                             </button>
                         </div>
                     </form>
@@ -358,6 +490,7 @@ const Config = () => {
                                     <th className="px-4 py-3 cursor-pointer hover:text-white" onClick={() => requestSort('interval')}>
                                         <div className="flex items-center">Interval <ArrowUpDown size={14} className="ml-1" /></div>
                                     </th>
+                                    <th className="px-4 py-3">Protocols</th>
                                     <th className="px-4 py-3 rounded-tr-lg text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -378,11 +511,35 @@ const Config = () => {
                                                     ) : 'Def'
                                                 )}
                                             </td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex gap-1">
+                                                    {(() => {
+                                                        // Check if ping is enabled (either on node or inherited from group)
+                                                        const pingEnabled = n.monitor_ping !== null ? n.monitor_ping : (group?.monitor_ping ?? true);
+                                                        const snmpEnabled = n.monitor_snmp !== null ? n.monitor_snmp : (group?.monitor_snmp ?? false);
+
+                                                        return (
+                                                            <>
+                                                                <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${pingEnabled ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-slate-700/20 text-slate-600 border-slate-700/30'}`}>
+                                                                    PING
+                                                                </span>
+                                                                <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded border ${snmpEnabled ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : 'bg-slate-700/20 text-slate-600 border-slate-700/30'}`}>
+                                                                    SNMP
+                                                                </span>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </td>
                                             <td className="px-4 py-3 text-right">
-                                                <button onClick={() => handleToggleNode(n)} className="bg-slate-700/50 hover:bg-slate-700 p-1 rounded transition-colors mr-2" title={n.enabled === false ? "Start Node" : "Pause Node"}>
-                                                    {n.enabled === false ? <Play size={18} className="text-green-400" /> : <Pause size={18} className="text-orange-400" />}
-                                                </button>
-                                                <button onClick={() => handleDeleteNode(n.id)} className="text-red-400 hover:text-red-300 p-1 rounded transition-colors"><Trash2 size={18} /></button>
+                                                <div className="flex items-center justify-end gap-2">
+                                                    <button onClick={() => handleToggleNode(n)} className="bg-slate-700/50 hover:bg-slate-700 p-1 rounded transition-colors" title={n.enabled === false ? "Start Node" : "Pause Node"}>
+                                                        {n.enabled === false ? <Play size={18} className="text-green-400" /> : <Pause size={18} className="text-orange-400" />}
+                                                    </button>
+                                                    <button onClick={() => handleDeleteNode(n.id)} className={`${deleteConfirm.type === 'node' && deleteConfirm.id === n.id ? 'bg-red-600 text-white px-2' : 'text-red-400 hover:text-red-300 p-1'} rounded transition-all flex items-center justify-center`}>
+                                                        {deleteConfirm.type === 'node' && deleteConfirm.id === n.id ? <span className="text-xs font-bold">Confirm</span> : <Trash2 size={18} />}
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     )
@@ -392,6 +549,10 @@ const Config = () => {
                         {nodes.length === 0 && <div className="p-4 text-center text-slate-500">No nodes defined.</div>}
                     </div>
                 </div>
+            )}
+
+            {activeTab === 'metrics' && (
+                <MetricsConfig nodes={nodes} groups={groups} />
             )}
         </div>
     );

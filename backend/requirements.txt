@@ -1,9 +1,8 @@
-fastapi
-uvicorn
-influxdb-client
-ping3
-pydantic
-sqlalchemy
-python-multipart
-python-dotenv
-aiofiles
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+ping3==4.0.8
+influxdb-client==1.48.0
+aiofiles==24.1.0
+python-multipart==0.0.17
+pysnmp-lextudio==5.0.34
