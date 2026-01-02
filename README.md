@@ -53,28 +53,53 @@ The easiest way to run the application locally on Windows is via the provided Po
 
 ## Docker Deployment
 
-For containerized deployment, use Docker Compose.
+For containerized deployment (e.g., on Proxmox LXC), use Docker Compose.
+**See [release_plan.md](release_plan.md) for detailed LXC/hardware specs.**
 
-**Prerequisites (Optional):**
-- InfluxDB 2.x (for time-series metrics storage). Configure connection via environment variables in `docker-compose.yml`.
+### 1. Installation
 
-1. **Build and Start**
-   ```bash
-   docker-compose up -d --build
-   ```
+1.  **Clone the Repository**
+    ```bash
+    git clone https://github.com/straybiker/BeamState.git
+    cd BeamState
+    ```
 
-2. **Access the Application**
-   - Frontend: [http://localhost:3000](http://localhost:3000)
-   - Backend API: [http://localhost:8000](http://localhost:8000)
+2.  **Configure Application**
+    Docker mounts the `backend/config.json` file. You must create this before starting.
+    ```bash
+    cd backend
+    cp config.json.example config.json
+    nano config.json 
+    # Add your network topology and InfluxDB settings here
+    cd ..
+    ```
 
-3. **Data Persistence**
-   - SQLite database and logs are stored in `./backend/data/`.
-   - Network topology is persisted via `./backend/config.json`.
+3.  **Start Services**
+    ```bash
+    docker compose up -d --build
+    ```
 
-4. **Stop**
-   ```bash
-   docker-compose down
-   ```
+### 2. Upgrading / Redeploying
+
+When you have new code (e.g., from `git pull`):
+
+```bash
+# 1. Get latest code
+git pull
+
+# 2. Rebuild and restart containers
+# --force-recreate is important to ensure the frontend picks up new configs
+docker compose up -d --build --force-recreate
+```
+
+### 3. Access
+- **Frontend**: `http://<YOUR_IP>:3000`
+- **Backend API**: `http://<YOUR_IP>:8000`
+
+### 4. Data Persistence
+- **Logs & Data**: Stored in `./backend/data/` (mapped to host).
+- **Configuration**: Stored in `./backend/config.json`.
+- **InfluxDB**: If external, data is stored on your InfluxDB instance (not in these containers).
 
 ## Configuration
 
