@@ -6,3 +6,4 @@ influxdb-client==1.48.0
 aiofiles==24.1.0
 python-multipart==0.0.17
 pysnmp-lextudio==5.0.34
+pyasn1>=0.4.8,<0.5.0

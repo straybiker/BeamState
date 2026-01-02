@@ -6,7 +6,7 @@ A real-time network monitoring application that pings configured nodes, monitors
 ## Features
 
 - **Real-time Monitoring**: Async pinging with configurable intervals.
-- **SNMP Support**: Monitor generic and specific OIDs (Interface Traffic, CPU, Memory, Uptime).
+- **SNMPv2c Support**: Monitor generic and specific OIDs (Interface Traffic, CPU, Memory, Uptime).
 - **Customizable Metrics**: Define your own OIDs in `backend/snmp.json` and configure them via the UI.
 - **Modern Dashboard**: Dark-themed UI showing node status, latency, SNMP availability, and detailed metrics.
 - **Web-Based Configuration**: Add, edit, and remove groups/nodes/metrics directly from the UI.
@@ -46,6 +46,10 @@ The easiest way to run the application locally on Windows is via the provided Po
    - Frontend: [http://localhost:5173](http://localhost:5173)
    - Backend API: [http://localhost:8000](http://localhost:8000)
    - API Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+## Documentation
+
+- [**Grafana Guide**](GRAFANA_GUIDE.md): Detailed instructions for setting up Grafana dashboards and alerts for BeamState.
 
 ## Docker Deployment
 
