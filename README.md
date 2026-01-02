@@ -13,6 +13,17 @@ A real-time network monitoring application that pings configured nodes, monitors
 - **Flexible Storage**: SQLite for configuration/cache, optional InfluxDB for time-series data.
 - **Bootstrap Config**: Define initial topology in `config.json` for automatic seeding.
 
+## Screenshots
+
+### Dashboard
+![Dashboard View](screenshots/dashboard.png)
+*Real-time monitoring dashboard showing node status, latency, and protocol availability*
+
+### SNMP Metrics
+![SNMP Metrics](screenshots/snmp_metrics.png)
+*Detailed SNMP metric visualization for configured devices*
+
+
 ## Quick Start (Windows)
 
 The easiest way to run the application locally on Windows is via the provided PowerShell script.
