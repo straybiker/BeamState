@@ -23,7 +23,7 @@ logging.basicConfig(
     level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("system.log"),
+        logging.FileHandler("data/system.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
