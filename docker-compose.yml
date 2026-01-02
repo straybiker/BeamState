@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Backend Service (FastAPI)
   backend:
@@ -9,11 +7,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # InfluxDB Configuration (Optional - uncomment and configure if using InfluxDB)
-      # - INFLUXDB_URL=http://your-influxdb-host:8086
-      # - INFLUXDB_TOKEN=your-token
-      # - INFLUXDB_ORG=your-org
-      # - INFLUXDB_BUCKET=your-bucket
       # Ping Configuration
       - PING_INTERVAL=60
       - PING_COUNT=1

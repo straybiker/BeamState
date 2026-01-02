@@ -116,6 +116,15 @@ class MonitorManager:
             )
             return
         
+        # Determine monitoring configuration
+        use_ping = node.monitor_ping if node.monitor_ping is not None else node.group.monitor_ping
+        use_snmp = node.monitor_snmp if node.monitor_snmp is not None else node.group.monitor_snmp
+        
+        # Get node settings (re-fetch to be safe/clear, though we fetched earlier)
+        # interval/packet_count are already fetched at top of function but we can reuse or just use what we have.
+        # Actually, looking at code above, I already fetched 'interval', 'packet_count', 'max_retries' at lines 68-71.
+        # So I only need to define use_ping and use_snmp.
+        
         # Run configured monitors
         monitor_results: List[MonitorResult] = []
         
