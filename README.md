@@ -80,6 +80,8 @@ For containerized deployment (e.g., on Proxmox LXC), use Docker Compose.
     ```bash
     cd backend
     cp config.json.example config.json
+
+    # Optional. You can do it from the UI later
     nano config.json 
     # Add your network topology and InfluxDB settings here
     cd ..
