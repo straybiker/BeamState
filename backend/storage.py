@@ -153,7 +153,7 @@ class Storage:
                     .tag("protocol", protocol)
                     .field("latency", float(latency) if latency is not None else 0.0)
                     .field("packet_loss", float(raw_data.get("packet_loss", 0.0)))
-                    .field("status_code", 1 if status == "UP" else 0)
+                    .field("status_code", 1 if status in ["UP", "PAUSED"] else 0)
                     .field("success", 1 if success else 0)
                     .field("responses", response_str if response_str else "none")
                 )

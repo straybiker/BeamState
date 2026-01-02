@@ -41,8 +41,20 @@ const Dashboard = () => {
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchStatusOnly, 5000); // Poll status every 5s
-        return () => clearInterval(interval);
+        // Poll both status AND configuration periodically to catch added/removed nodes
+        const interval = setInterval(() => {
+            fetchStatusOnly();
+        }, 5000);
+
+        const configInterval = setInterval(() => {
+            // Re-fetch groups to catch deletions/additions
+            api.get('/config/groups').then(res => setGroups(res.data)).catch(e => console.error(e));
+        }, 5000);
+
+        return () => {
+            clearInterval(interval);
+            clearInterval(configInterval);
+        };
     }, []);
 
     // Group pinger results by group_name for easy lookup

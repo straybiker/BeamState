@@ -65,26 +65,6 @@ class MonitorManager:
             logger.warning(f"Node {node.name} ({node.id}) is an orphan (no group). Skipping.")
             return
         
-        # Skip if node or group is disabled (PAUSED)
-        if not node.enabled or not node.group.enabled:
-            self.latest_results[node.id] = {
-                "node_id": node.id,
-                "node_name": node.name,
-                "ip": node.ip,
-                "group_name": node.group.name,
-                "status": "PAUSED",
-                "latency": None,
-                "packet_loss": 0,
-                "timestamp": now,
-                "monitor_ping": False,  # Default
-                "monitor_snmp": False
-            }
-            return
-        
-        # Determine monitoring configuration
-        use_ping = node.monitor_ping if node.monitor_ping is not None else node.group.monitor_ping
-        use_snmp = node.monitor_snmp if node.monitor_snmp is not None else node.group.monitor_snmp
-        
         # Get node settings
         interval = node.interval if node.interval is not None else node.group.interval
         packet_count = node.packet_count if node.packet_count is not None else node.group.packet_count
@@ -105,6 +85,36 @@ class MonitorManager:
             return
         
         self.last_ping_time[node.id] = now
+
+        # Skip monitoring if node or group is disabled (PAUSED)
+        # BUT write a PAUSED record to storage to ensure alerts clear (status_code=1)
+        if not node.enabled or not node.group.enabled:
+            # Update cache
+            self.latest_results[node.id] = {
+                "node_id": node.id,
+                "node_name": node.name,
+                "ip": node.ip,
+                "group_name": node.group.name,
+                "status": "PAUSED",
+                "latency": None,
+                "packet_loss": 0,
+                "timestamp": now,
+                "monitor_ping": False,
+                "monitor_snmp": False
+            }
+            # Write 'PAUSED' to storage to clear any stale DOWN alerts
+            # We use a dummy protocol 'system' or just 'icmp' to ensure it appears in the same query
+            await storage.write_monitor_result(
+                node_name=node.name,
+                ip=node.ip,
+                group_name=node.group.name,
+                protocol="icmp", # Use icmp so it shows up in main status query
+                latency=0.0,
+                status="PAUSED",
+                success=True, # Treated as success to be safe
+                raw_data={}
+            )
+            return
         
         # Run configured monitors
         monitor_results: List[MonitorResult] = []
