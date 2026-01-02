@@ -3,6 +3,7 @@ import api from '../api';
 import { Plus, Trash2, ArrowUpDown, Play, Pause } from 'lucide-react';
 import toast from 'react-hot-toast';
 import MetricsConfig from './MetricsConfig';
+import AppConfig from './AppConfig';
 
 const Config = () => {
     const [groups, setGroups] = useState([]);
@@ -308,7 +309,6 @@ const Config = () => {
             <header className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                 <div>
                     <h2 className="text-3xl font-bold text-slate-100">Configuration</h2>
-                    <p className="text-slate-400">Manage groups and nodes</p>
                 </div>
 
                 <div className="flex items-center gap-6">
@@ -326,6 +326,10 @@ const Config = () => {
                             onClick={() => setActiveTab('groups')}
                             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'groups' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
                         >Groups</button>
+                        <button
+                            onClick={() => setActiveTab('settings')}
+                            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'settings' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                        >Settings</button>
                     </div>
 
                     <img
@@ -640,6 +644,10 @@ const Config = () => {
 
             {activeTab === 'metrics' && (
                 <MetricsConfig nodes={nodes} groups={groups} />
+            )}
+
+            {activeTab === 'settings' && (
+                <AppConfig />
             )}
         </div>
     );

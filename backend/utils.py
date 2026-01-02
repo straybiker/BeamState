@@ -14,10 +14,22 @@ def save_config(db: Session):
     This ensures persistence across restarts.
     """
     try:
+        # 1. Read existing config to preserve app_config
+        existing_data = {}
+        if os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, "r") as f:
+                    existing_data = json.load(f)
+            except:
+                pass # corrupted or empty, start fresh-ish
+        
         # Fetch all groups with their nodes
         groups = db.query(GroupDB).all()
         
-        config_data = {"groups": []}
+        config_data = {
+            "app_config": existing_data.get("app_config", {}), # Preserve existing app_config
+            "groups": []
+        }
         
         for group in groups:
             group_data = {
@@ -56,3 +68,26 @@ def save_config(db: Session):
         
     except Exception as e:
         logger.error(f"Failed to save configuration: {e}")
+
+def save_app_config(app_config: dict):
+    """
+    Updates the app_config section in config.json without modifying groups.
+    """
+    try:
+        if not os.path.exists(CONFIG_PATH):
+            logger.error("config.json not found")
+            return
+
+        with open(CONFIG_PATH, "r") as f:
+            data = json.load(f)
+            
+        data["app_config"] = app_config
+        
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(data, f, indent=4)
+            
+        logger.info(f"App configuration saved to {CONFIG_PATH}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save app configuration: {e}")
+        raise

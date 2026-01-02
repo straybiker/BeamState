@@ -164,3 +164,25 @@ def delete_node(node_id: str, request: Request, db: Session = Depends(get_db)):
         request.app.state.pinger.remove_node(node_id)
         
     return {"ok": True}
+
+# --- APP CONFIG ---
+
+@router.get("/app")
+def get_app_config():
+    """Get current application configuration"""
+    from storage import storage
+    return storage.config
+
+@router.put("/app")
+def update_app_config(config: dict, request: Request):
+    """Update application configuration"""
+    from utils import save_app_config
+    from storage import storage
+    
+    # Save to file
+    save_app_config(config)
+    
+    # Reload storage config
+    storage.reload_config()
+    
+    return storage.config

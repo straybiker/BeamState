@@ -4,7 +4,15 @@ import sys
 import logging
 
 # Setup Logging
-logging.basicConfig(level=logging.INFO)
+# Setup Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("backend.log"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger("BeamState")
 
 # Fix for Windows: "ValueError: too many file descriptors in select()"

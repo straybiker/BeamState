@@ -3,6 +3,7 @@ from pysnmp.hlapi.asyncio import *
 from typing import List, Dict, Optional
 from models import NodeDB, NodeMetricDB, MetricDefinitionDB
 from database import SessionLocal
+from storage import storage
 import logging
 import time
 
@@ -84,11 +85,10 @@ class SNMPDataCollector:
                 val = await self.collect_single_metric(node, node_metric, community, port)
                 if val is not None:
                     # Pass the definition's metric type and unit to store_metric_value
-                    self.store_metric_value(
-                        node_metric.id, 
-                        val, 
-                        node_metric.metric_definition.metric_type,
-                        node_metric.metric_definition.unit
+                    await self.store_metric_value(
+                        node,
+                        node_metric,
+                        val
                     )
                     
         except Exception as e:
@@ -134,9 +134,13 @@ class SNMPDataCollector:
             logger.error(f"Metric collection exception: {e}")
             return None
             
-    def store_metric_value(self, node_metric_id: str, value: str, metric_type: str = 'gauge', unit: str = None):
-        """Store the latest metric value in memory and calculate rate if counter"""
+    async def store_metric_value(self, node: NodeDB, node_metric: NodeMetricDB, value: str):
+        """Store the latest metric value in memory, calculate rate, and persist to storage"""
         now = time.time()
+        metric_def = node_metric.metric_definition
+        node_metric_id = node_metric.id
+        metric_type = metric_def.metric_type
+        unit = metric_def.unit
         
         entry = {
             "value": value,
@@ -144,6 +148,21 @@ class SNMPDataCollector:
             "rate": None
         }
         
+        # Value to store in InfluxDB 
+        # (for counters, we prefer rate if available, otherwise raw delta or simply allow flexible query)
+        # Actually, standard practice for InfluxDB: store the raw COUNTER value, let InfluxQL/Flux calculate derivative.
+        # BUT, because counters reset/wrap, and we want easy querying, storing the calculated rate is often friendlier 
+        # for simple dashboards. Let's store BOTH if possible, or just the useful one.
+        #
+        # Decision: Store the calculated RATE for counters (bps), and raw VALUE for gauges (cpu %).
+        persist_value = None
+        
+        try:
+             float_val = float(value)
+             persist_value = float_val
+        except:
+             pass
+
         # Rate Calculation Logic
         if metric_type == 'counter':
             prev = self.previous_values.get(node_metric_id)
@@ -164,6 +183,8 @@ class SNMPDataCollector:
                                 rate = val_delta / time_delta
                             
                             entry['rate'] = rate
+                            persist_value = rate # For counters, we often care about the rate
+                            
                 except (ValueError, TypeError):
                     pass
             
@@ -174,6 +195,23 @@ class SNMPDataCollector:
             }
             
         self.current_values[node_metric_id] = entry
+        
+        # Persist to InfluxDB
+        if persist_value is not None:
+             # Add interface name to metric name if applicable for clarity? 
+             # Or keep generic metric name and use tag? Tag is better.
+             # e.g. metric="Traffic In", interface="eth0"
+             
+             await storage.write_snmp_metric(
+                 node_name=node.name,
+                 ip=node.ip,
+                 group_name=node.group.name if node.group else "global",
+                 metric_name=metric_def.name,
+                 value=persist_value,
+                 unit=unit if metric_type != 'counter' or unit != 'bytes' else 'bps', # Change unit to bps if rate
+                 interface=node_metric.interface_name,
+                 metric_type=metric_type
+             )
         
     def get_current_values(self, node_id: str = None) -> Dict:
         """Get current values, optionally filtered by node"""

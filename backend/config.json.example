@@ -1,0 +1,46 @@
+{
+    "app_config": {
+        "influxdb": {
+            "enabled": false,
+            "url": "http://your-influxdb-host:8086",
+            "token": "YOUR_INFLUXDB_TOKEN_HERE",
+            "org": "your-org",
+            "bucket": "monitoring"
+        },
+        "logging": {
+            "file_enabled": true,
+            "file_path": "data/logs.json",
+            "retention_lines": 200
+        }
+    },
+    "groups": [
+        {
+            "id": "example-group-uuid",
+            "name": "Example Group",
+            "interval": 60,
+            "packet_count": 1,
+            "max_retries": 4,
+            "enabled": true,
+            "monitor_ping": true,
+            "monitor_snmp": false,
+            "snmp_community": "public",
+            "snmp_port": 161
+        }
+    ],
+    "nodes": [
+        {
+            "id": "example-node-uuid",
+            "group_id": "example-group-uuid",
+            "name": "Example Router",
+            "ip": "192.168.1.1",
+            "interval": null,
+            "packet_count": null,
+            "max_retries": null,
+            "enabled": true,
+            "monitor_ping": true,
+            "monitor_snmp": true,
+            "snmp_community": null,
+            "snmp_port": null
+        }
+    ]
+}
