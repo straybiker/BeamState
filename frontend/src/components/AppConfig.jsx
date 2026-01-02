@@ -143,13 +143,16 @@ const AppConfig = () => {
                     </div>
                 </div>
 
-                {/* Logging Configuration */}
+                {/* Monitoring Data Logs Configuration */}
                 <div className="bg-surface rounded-xl p-6 border border-slate-700/50">
                     <div className="flex items-center space-x-3 mb-4">
                         <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg">
                             <FileText size={24} />
                         </div>
-                        <h3 className="text-lg font-semibold text-white">Local Logging</h3>
+                        <div>
+                            <h3 className="text-lg font-semibold text-white">Monitoring Data Logs</h3>
+                            <p className="text-xs text-slate-400">Store monitoring results to JSON file</p>
+                        </div>
                     </div>
 
                     <div className="space-y-4">
@@ -162,7 +165,7 @@ const AppConfig = () => {
                                 className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-primary focus:ring-primary"
                             />
                             <label htmlFor="logging-enabled" className="text-sm font-medium text-slate-200">
-                                Enable File Logging
+                                Enable Monitoring Data Logging
                             </label>
                         </div>
 
@@ -185,6 +188,46 @@ const AppConfig = () => {
                                 onChange={(e) => handleChange('logging', 'retention_lines', parseInt(e.target.value))}
                                 className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
                             />
+                            <p className="text-xs text-slate-500">Maximum lines to keep in the log file.</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* System Logs Configuration */}
+                <div className="bg-surface rounded-xl p-6 border border-slate-700/50">
+                    <div className="flex items-center space-x-3 mb-4">
+                        <div className="p-2 bg-green-500/20 text-green-400 rounded-lg">
+                            <FileText size={24} />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold text-white">System Logs</h3>
+                            <p className="text-xs text-slate-400">Application events (always enabled)</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="bg-slate-900/50 border border-slate-700 rounded p-3">
+                            <p className="text-sm text-slate-300">
+                                System logs are always written to <code className="text-primary font-mono text-xs">backend/system.log</code>
+                            </p>
+                            <p className="text-xs text-slate-500 mt-2">
+                                Contains startup events, warnings, errors, and monitoring activity based on log level.
+                            </p>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">System Log Level</label>
+                            <select
+                                value={config.logging.log_level || 'INFO'}
+                                onChange={(e) => handleChange('logging', 'log_level', e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
+                            >
+                                <option value="DEBUG">DEBUG - Verbose (includes all monitoring results)</option>
+                                <option value="INFO">INFO - Standard (startup, warnings, errors)</option>
+                                <option value="WARNING">WARNING - Warnings and errors only</option>
+                                <option value="ERROR">ERROR - Errors only</option>
+                            </select>
+                            <p className="text-xs text-slate-500">⚠️ Requires application restart to take effect.</p>
                         </div>
                     </div>
                 </div>

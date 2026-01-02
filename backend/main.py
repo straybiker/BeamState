@@ -2,10 +2,25 @@ import asyncio
 import os
 import sys
 import logging
+import json
+import pathlib
+
+# Load log level from config
+CONFIG_FILE = pathlib.Path(__file__).parent / "config.json"
+log_level = logging.INFO  # Default
+try:
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE, 'r') as f:
+            data = json.load(f)
+            if "app_config" in data and "logging" in data["app_config"]:
+                level_str = data["app_config"]["logging"].get("log_level", "INFO")
+                log_level = getattr(logging, level_str.upper(), logging.INFO)
+except Exception:
+    pass  # Fall back to default
 
 # Setup Logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("system.log"),

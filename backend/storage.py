@@ -30,7 +30,8 @@ class Storage:
             "logging": {
                 "file_enabled": True,
                 "file_path": "data/logs.json",
-                "retention_lines": 200
+                "retention_lines": 200,
+                "log_level": "INFO"
             }
         }
         

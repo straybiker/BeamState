@@ -167,10 +167,10 @@ class MonitorManager:
         # Update state
         state["status"] = new_status
         
-        # Log result
+        # Log result at DEBUG level (use INFO for warnings/errors)
         lat_str = f"{avg_latency:.2f}ms" if avg_latency is not None else "N/A"
         protocols = [r.protocol.upper() for r in monitor_results]
-        logger.info(f"Result for {node.name} ({'/'.join(protocols)}): {new_status}, Latency: {lat_str}, Loss: {packet_loss}%")
+        logger.debug(f"Result for {node.name} ({'/'.join(protocols)}): {new_status}, Latency: {lat_str}, Loss: {packet_loss}%")
         
         # Store latest result
         self.latest_results[node.id] = {
