@@ -10,6 +10,10 @@ const Config = () => {
     const [nodes, setNodes] = useState([]);
     const [activeTab, setActiveTab] = useState('nodes'); // 'nodes' or 'groups'
 
+    // Filters for nodes list
+    const [filterGroup, setFilterGroup] = useState('all');
+    const [filterProtocol, setFilterProtocol] = useState('all');
+
     // Forms
     const [newGroup, setNewGroup] = useState({
         name: '',
@@ -445,7 +449,7 @@ const Config = () => {
                     {/* Create/Edit Node Form */}
                     <form onSubmit={handleCreateOrUpdateNode} className={`grid grid-cols-1 gap-4 p-4 rounded-lg border ${editingNode ? 'bg-blue-900/20 border-blue-500/30' : 'bg-slate-800/50 border-slate-700/50'}`}>
                         {/* Basic Info Row */}
-                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
                             <div className="col-span-1 md:col-span-3">
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Name</label>
                                 <input
@@ -454,7 +458,7 @@ const Config = () => {
                                     value={newNode.name} onChange={e => setNewNode({ ...newNode, name: e.target.value })}
                                 />
                             </div>
-                            <div className="col-span-1 md:col-span-3">
+                            <div className="col-span-1 md:col-span-2">
                                 <label className="block text-sm font-medium text-slate-400 mb-1">IP Address</label>
                                 <input
                                     type="text" required
@@ -474,7 +478,7 @@ const Config = () => {
                                     {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                                 </select>
                             </div>
-                            <div className="col-span-1 md:col-span-3">
+                            <div className="col-span-1 md:col-span-2">
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Interval (Opt)</label>
                                 <input
                                     type="number"
@@ -483,7 +487,32 @@ const Config = () => {
                                     value={newNode.interval} onChange={e => setNewNode({ ...newNode, interval: e.target.value })}
                                 />
                             </div>
+                            <div className="col-span-1 md:col-span-2">
+                                {editingNode && (
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelEdit}
+                                        className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                )}
+                                {!editingNode && (
+                                    <button type="submit" className="w-full bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors flex items-center justify-center">
+                                        <Plus size={18} className="mr-2" /> Add Node
+                                    </button>
+                                )}
+                            </div>
                         </div>
+
+                        {/* Update button for editing mode - separate row */}
+                        {editingNode && (
+                            <div className="flex justify-end">
+                                <button type="submit" className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors">
+                                    Update Node
+                                </button>
+                            </div>
+                        )}
 
                         {/* Protocol Selection */}
                         <div className="border-t border-slate-700 pt-4">
@@ -535,26 +564,45 @@ const Config = () => {
                                 </div>
                             </div>
                         )}
-
-                        <div className="flex justify-end gap-2">
-                            {editingNode && (
-                                <button
-                                    type="button"
-                                    onClick={handleCancelEdit}
-                                    className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                            )}
-                            <button type="submit" className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors flex items-center justify-center">
-                                {editingNode ? (
-                                    'Update Node'
-                                ) : (
-                                    <><Plus size={18} className="mr-2" /> Add Node</>
-                                )}
-                            </button>
-                        </div>
                     </form>
+
+                    {/* Filters */}
+                    <div className="flex flex-wrap gap-3 items-center">
+                        <div className="flex items-center space-x-2">
+                            <label className="text-sm text-slate-400 font-medium">Group:</label>
+                            <select
+                                value={filterGroup}
+                                onChange={(e) => setFilterGroup(e.target.value)}
+                                className="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:ring-2 focus:ring-primary outline-none"
+                            >
+                                <option value="all">All Groups</option>
+                                {groups.map(g => (
+                                    <option key={g.id} value={g.id}>{g.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <label className="text-sm text-slate-400 font-medium">Protocol:</label>
+                            <select
+                                value={filterProtocol}
+                                onChange={(e) => setFilterProtocol(e.target.value)}
+                                className="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:ring-2 focus:ring-primary outline-none"
+                            >
+                                <option value="all">All Protocols</option>
+                                <option value="ping">PING Only</option>
+                                <option value="snmp">SNMP Only</option>
+                                <option value="both">Both PING & SNMP</option>
+                            </select>
+                        </div>
+                        {(filterGroup !== 'all' || filterProtocol !== 'all') && (
+                            <button
+                                onClick={() => { setFilterGroup('all'); setFilterProtocol('all'); }}
+                                className="text-xs text-slate-400 hover:text-white transition-colors underline"
+                            >
+                                Clear Filters
+                            </button>
+                        )}
+                    </div>
 
                     {/* Nodes List */}
                     <div className="overflow-x-auto">
@@ -578,7 +626,17 @@ const Config = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-700">
-                                {getSortedNodes().map(n => {
+                                {getSortedNodes().filter(n => {
+                                    // Filter by group
+                                    if (filterGroup !== 'all' && n.group_id !== filterGroup) return false;
+
+                                    // Filter by protocol
+                                    if (filterProtocol === 'ping' && !n.monitor_ping) return false;
+                                    if (filterProtocol === 'snmp' && !n.monitor_snmp) return false;
+                                    if (filterProtocol === 'both' && !(n.monitor_ping && n.monitor_snmp)) return false;
+
+                                    return true;
+                                }).map(n => {
                                     const group = groups.find(g => g.id === n.group_id);
                                     const isEditing = editingNode?.id === n.id;
                                     return (
