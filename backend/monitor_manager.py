@@ -188,13 +188,20 @@ class MonitorManager:
         
         # Write to Storage (log each monitor result separately)
         for result in monitor_results:
+            # Determine status for this specific protocol check
+            # Use Node status if it's PENDING (to show retry state), otherwise purely based on success
+            if new_status == "PENDING":
+                record_status = "PENDING"
+            else:
+                record_status = "UP" if result.success else "DOWN"
+
             await storage.write_monitor_result(
                 node_name=node.name,
                 ip=node.ip,
                 group_name=node.group.name,
                 protocol=result.protocol,
                 latency=result.latency_ms,
-                status=new_status,
+                status=record_status,
                 success=result.success,
                 raw_data=result.raw_data
             )

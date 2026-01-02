@@ -5,7 +5,17 @@ Write-Host "BeamState Application Startup" -ForegroundColor Cyan
 Write-Host "==============================" -ForegroundColor Cyan
 Write-Host ""
 
-# Function to stop process on a specific port
+# Function to aggressive cleanup
+function Cleanup-Zombies {
+    Write-Host "Cleaning up potential zombie processes..." -ForegroundColor Yellow
+    Stop-Process -Name "python", "node", "uvicorn" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+}
+
+# Run cleanup
+Cleanup-Zombies
+
+# Function to stop process on a specific port (Legacy check)
 function Stop-PortProcess {
     param(
         [int]$Port,
@@ -34,7 +44,7 @@ function Stop-PortProcess {
     }
 }
 
-# Clean up ports
+# Clean up ports (Double check)
 Stop-PortProcess -Port 8000 -ServiceName "Backend"
 Stop-PortProcess -Port 5173 -ServiceName "Frontend"
 
@@ -42,15 +52,15 @@ Write-Host ""
 Write-Host "Starting services..." -ForegroundColor Cyan
 Write-Host ""
 
-# Start backend in new window
+# Start backend in new window (autoclose on exit)
 Write-Host "[Backend] Starting on port 8000..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\backend'; python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000" -WorkingDirectory "$PSScriptRoot"
+Start-Process powershell -ArgumentList "-Command", "cd '$PSScriptRoot\backend'; python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000; Read-Host 'Backend stopped. Press Enter to close.'" -WorkingDirectory "$PSScriptRoot"
 
 Start-Sleep -Seconds 3
 
-# Start frontend in new window
+# Start frontend in new window (autoclose on exit)
 Write-Host "[Frontend] Starting on port 5173..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\frontend'; npm run dev" -WorkingDirectory "$PSScriptRoot"
+Start-Process powershell -ArgumentList "-Command", "cd '$PSScriptRoot\frontend'; npm run dev; Read-Host 'Frontend stopped. Press Enter to close.'" -WorkingDirectory "$PSScriptRoot"
 
 Write-Host ""
 Write-Host "BeamState started!" -ForegroundColor Green

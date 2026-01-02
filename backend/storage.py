@@ -148,7 +148,8 @@ class Storage:
                     .tag("node", node_name)
                     .tag("ip", ip)
                     .tag("group", group_name)
-                    .tag("status", status)
+                    # Status is now a field, not a tag, to prevent series fragmentation
+                    .field("status_text", status)
                     .tag("protocol", protocol)
                     .field("latency", float(latency) if latency is not None else 0.0)
                     .field("packet_loss", float(raw_data.get("packet_loss", 0.0)))
