@@ -169,9 +169,20 @@ def delete_node(node_id: str, request: Request, db: Session = Depends(get_db)):
 
 @router.get("/app")
 def get_app_config():
-    """Get current application configuration"""
+    """Get current application configuration with masked secrets"""
     from storage import storage
-    return storage.config
+    import copy
+    
+    # Deep copy to avoid modifying original
+    config = copy.deepcopy(storage.config)
+    
+    # Mask sensitive data
+    if "influxdb" in config and "token" in config["influxdb"]:
+        token = config["influxdb"]["token"]
+        if token and len(token) > 0:
+            config["influxdb"]["token"] = "***REDACTED***"
+    
+    return config
 
 @router.put("/app")
 def update_app_config(config: dict, request: Request):

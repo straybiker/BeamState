@@ -4,12 +4,11 @@ import sys
 import logging
 
 # Setup Logging
-# Setup Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("backend.log"),
+        logging.FileHandler("system.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )

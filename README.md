@@ -23,7 +23,16 @@ The easiest way to run the application locally on Windows is via the provided Po
    cd BeamState
    ```
 
-2. **Start the Application**
+2. **Configure the Application**
+   ```bash
+   cd backend
+   cp config.json.example config.json
+   # Edit config.json with your settings (InfluxDB, network topology, etc.)
+   ```
+   
+   **Important**: The `config.json` file contains sensitive data (InfluxDB tokens, network topology). It is gitignored and will not be committed to version control.
+
+3. **Start the Application**
    Open PowerShell as **Administrator** (required for ICMP Ping) and run:
    ```powershell
    .\start-app.ps1
@@ -33,7 +42,7 @@ The easiest way to run the application locally on Windows is via the provided Po
    - Start the Backend (Uvicorn) on port 8000.
    - Start the Frontend (Vite) on port 5173.
 
-3. **Open the Application**
+4. **Open the Application**
    - Frontend: [http://localhost:5173](http://localhost:5173)
    - Backend API: [http://localhost:8000](http://localhost:8000)
    - API Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
@@ -65,8 +74,19 @@ For containerized deployment, use Docker Compose.
 
 ## Configuration
 
-### Network Topology (`config.json`)
-The `backend/config.json` file acts as a blueprint. On startup, the database syncs with this file.
+### Initial Setup
+1. Copy `backend/config.json.example` to `backend/config.json`
+2. Configure your InfluxDB connection (optional but recommended for time-series data)
+3. Define your initial network topology (groups and nodes)
+4. Adjust logging preferences
+
+### Application Config (`app_config`)
+The `app_config` section in `config.json` contains global settings:
+- **InfluxDB**: Connection details for time-series storage (can also be configured via UI)
+- **Logging**: File logging settings and retention policy
+
+### Network Topology
+The `groups` and `nodes` arrays define your network. On startup, the database syncs with this file.
 
 ### SNMP Metrics (`snmp.json`)
 Default SNMP metric definitions are stored in `backend/snmp.json`. You can add custom OIDs here.
@@ -109,19 +129,20 @@ BeamState/
 └── start-app.ps1           # Startup script
 ```
 
-## Features to Implement
+## Recent Improvements
 
-### Monitoring & Data Collection
-- [ ] **Log to InfluxDB and/or Logfile** - Make logging destination configurable
-- [ ] **Logfile Retention Setting** - Add configurable retention policy for JSON logs
+### ✅ Completed
+- **InfluxDB Integration** - Full support for time-series data storage with UI configuration
+- **SNMP Metric Persistence** - Detailed metrics (CPU, Traffic) written to InfluxDB
+- **Configurable Logging** - File logging with retention policy, separate system and runtime logs
+- **Security Hardening** - Sensitive data removed from Git, API token masking
+
+## Roadmap
 
 ### Configuration UI
-- [ ] **InfluxDB Config in UI** - Add InfluxDB connection settings to configuration page
 - [ ] **Max Retries Config** - Expose `max_retries` setting in UI (currently only in config.json)
-- [ ] **Ping Timeout Config** - Expose ping timeout setting in UI (currently hardcoded to 5000ms)
-- [ ] **SNMP Timeout Config** - Expose SNMP timeout setting in UI (currently hardcoded to 5000ms)
-- [ ] **SNMP OID Config** - Expose SNMP OID setting in UI (currently only in config.json)
-- [ ] **SNMP Version Config** - Expose SNMP version setting in UI (currently only in config.json)
+- [ ] **Timeout Config** - Expose ping/SNMP timeout settings in UI (currently hardcoded to 5s)
+- [ ] **SNMP Version Config** - Expose SNMP version setting in UI (currently v2c only)
 
 ### Dashboard
 - [ ] **Collapseable groups** - Add collapseable groups in dashboard

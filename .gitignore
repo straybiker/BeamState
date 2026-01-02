@@ -12,4 +12,4 @@ backend/data/*.json
 backend/data/*.db
 backend/config.json
 backend/config - Copy.json
-backend/backend.log
+backend/system.log
