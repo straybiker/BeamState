@@ -15,28 +15,37 @@ router = APIRouter(prefix="/config", tags=["configuration"])
 
 @router.get("/groups", response_model=List[Group])
 def read_groups(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    groups = db.query(GroupDB).offset(skip).limit(limit).all()
-    return groups
+    try:
+        groups = db.query(GroupDB).offset(skip).limit(limit).all()
+        logger.debug(f"Fetched {len(groups)} groups")
+        return groups
+    except Exception as e:
+        logger.error(f"Failed to fetch groups: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load groups: {str(e)}")
 
 @router.post("/groups", response_model=Group)
 def create_group(group: GroupCreate, db: Session = Depends(get_db)):
-    db_group = db.query(GroupDB).filter(GroupDB.name == group.name).first()
-    if db_group:
-        raise HTTPException(status_code=400, detail="Group already exists")
-    
-    # Generate explicit UUID if not provided by DB default? 
-    # Actually DB default will handle it, but for persistence efficiency might differ 
-    # But relying on DB default is fine.
-    
-    new_group = GroupDB(**group.model_dump())
-    db.add(new_group)
-    db.commit()
-    db.refresh(new_group)
-    
-    # Sync to config.json
-    save_config(db)
-    
-    return new_group
+    try:
+        db_group = db.query(GroupDB).filter(GroupDB.name == group.name).first()
+        if db_group:
+            raise HTTPException(status_code=400, detail="Group already exists")
+        
+        new_group = GroupDB(**group.model_dump())
+        db.add(new_group)
+        db.commit()
+        db.refresh(new_group)
+        
+        # Sync to config.json
+        save_config(db)
+        logger.info(f"Created group: {new_group.name} (ID: {new_group.id})")
+        
+        return new_group
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create group '{group.name}': {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create group: {str(e)}")
 
 @router.put("/groups/{group_id}", response_model=Group)
 def update_group(group_id: str, group: GroupCreate, request: Request, db: Session = Depends(get_db)):
@@ -170,30 +179,40 @@ def delete_node(node_id: str, request: Request, db: Session = Depends(get_db)):
 @router.get("/app")
 def get_app_config():
     """Get current application configuration with masked secrets"""
-    from storage import storage
-    import copy
-    
-    # Deep copy to avoid modifying original
-    config = copy.deepcopy(storage.config)
-    
-    # Mask sensitive data
-    if "influxdb" in config and "token" in config["influxdb"]:
-        token = config["influxdb"]["token"]
-        if token and len(token) > 0:
-            config["influxdb"]["token"] = "***REDACTED***"
-    
-    return config
+    try:
+        from storage import storage
+        import copy
+        
+        # Deep copy to avoid modifying original
+        config = copy.deepcopy(storage.config)
+        
+        # Mask sensitive data
+        if "influxdb" in config and "token" in config["influxdb"]:
+            token = config["influxdb"]["token"]
+            if token and len(token) > 0:
+                config["influxdb"]["token"] = "***REDACTED***"
+        
+        logger.debug("App config fetched successfully")
+        return config
+    except Exception as e:
+        logger.error(f"Failed to fetch app config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load configuration: {str(e)}")
 
 @router.put("/app")
 def update_app_config(config: dict, request: Request):
     """Update application configuration"""
-    from utils import save_app_config
-    from storage import storage
-    
-    # Save to file
-    save_app_config(config)
-    
-    # Reload storage config
-    storage.reload_config()
-    
-    return storage.config
+    try:
+        from utils import save_app_config
+        from storage import storage
+        
+        # Save to file
+        save_app_config(config)
+        
+        # Reload storage config
+        storage.reload_config()
+        
+        logger.info("App config updated successfully")
+        return storage.config
+    except Exception as e:
+        logger.error(f"Failed to update app config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save configuration: {str(e)}")
