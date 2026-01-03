@@ -1,5 +1,8 @@
-# <img src="frontend/public/logo_transparant.png" alt="BeamState Logo" width="150"> BeamState
-**Network Monitoring**
+<p align="center">
+   <img src="frontend/public/logo_transparant.png" alt="BeamState Logo" width="150"> 
+</p>
+
+# BeamState Network Monitor
 
 A real-time network monitoring application that pings configured nodes, monitors SNMP metrics (Cpu, Memory, Traffic, etc.), and displays their status on a dashboard.
 
