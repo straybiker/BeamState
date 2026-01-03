@@ -9,6 +9,7 @@ RUN npm run build
 # Stage 2: Serve
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
-# Optional: Add custom nginx config here if needed for SPA routing
+# Add custom nginx config for SPA routing
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
