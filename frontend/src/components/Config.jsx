@@ -631,8 +631,8 @@ const Config = () => {
                                     if (filterGroup !== 'all' && n.group_id !== filterGroup) return false;
 
                                     // Filter by protocol
-                                    if (filterProtocol === 'ping' && !n.monitor_ping) return false;
-                                    if (filterProtocol === 'snmp' && !n.monitor_snmp) return false;
+                                    if (filterProtocol === 'ping' && (!n.monitor_ping || n.monitor_snmp)) return false;
+                                    if (filterProtocol === 'snmp' && (!n.monitor_snmp || n.monitor_ping)) return false;
                                     if (filterProtocol === 'both' && !(n.monitor_ping && n.monitor_snmp)) return false;
 
                                     return true;
