@@ -92,11 +92,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from routers import config, metrics
+from routers import config, metrics, discovery
 
 # Include Routers (prefixes are defined in the router modules themselves)
 app.include_router(config.router)
 app.include_router(metrics.router)
+app.include_router(discovery.router)
 
 
 

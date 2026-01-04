@@ -8,6 +8,7 @@ A real-time network monitoring application that pings configured nodes, monitors
 - **Real-time Monitoring**: Async pinging with configurable intervals.
 - **SNMPv2c Support**: Monitor generic and specific OIDs (Interface Traffic, CPU, Memory, Uptime).
 - **Customizable Metrics**: Define your own OIDs in `backend/snmp.json` and configure them via the UI.
+- **Enhanced Network Discovery**: Scan subnets for ICMP and SNMP devices, merging results intelligently with existing configurations.
 - **Modern Dashboard**: Dark-themed UI showing node status, latency, SNMP availability, and detailed metrics.
 - **Web-Based Configuration**: Add, edit, and remove groups/nodes/metrics directly from the UI.
 - **Flexible Storage**: SQLite for configuration/cache, optional InfluxDB for time-series data.
@@ -168,16 +169,18 @@ BeamState/
 ├── frontend/
 │   ├── src/components/     # React components
 │   └── public/             # Assets
-└── start-app.ps1           # Startup script
+171: └── start-app.ps1           # Startup script
 ```
 
 ## Recent Improvements
 
 ### ✅ Completed
-- **InfluxDB Integration** - Full support for time-series data storage with UI configuration
-- **SNMP Metric Persistence** - Detailed metrics (CPU, Traffic) written to InfluxDB
-- **Configurable Logging** - File logging with retention policy, separate system and runtime logs
-- **Security Hardening** - Sensitive data removed from Git, API token masking
+- **Smart Node Import** - Merges found protocols (ICMP/SNMP) into existing nodes without data loss.
+- **Enhanced Discovery UI** - Visual protocol badges and strict import filters based on scan settings.
+- **InfluxDB Integration** - Full support for time-series data storage with UI configuration.
+- **SNMP Metric Persistence** - Detailed metrics (CPU, Traffic) written to InfluxDB.
+- **Configurable Logging** - File logging with retention policy, separate system and runtime logs.
+- **Security Hardening** - Sensitive data removed from Git, API token masking.
 
 ## Roadmap
 
