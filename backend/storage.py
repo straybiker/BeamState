@@ -31,7 +31,19 @@ class Storage:
                 "file_enabled": True,
                 "file_path": "data/logs.json",
                 "retention_lines": 200,
+                "retention_lines": 200,
                 "log_level": "INFO"
+            },
+            "pushover": {
+                "enabled": False,
+                "token": "",
+                "user_key": "",
+                "priority": 0,
+                "priority": 0,
+                "message_template": "Node {name} ({ip}) is DOWN",
+                "throttling_enabled": False,
+                "alert_threshold": 5,
+                "alert_window": 60
             }
         }
         
@@ -42,10 +54,13 @@ class Storage:
                     if "app_config" in data:
                         # Deep merge or just update keys
                         app_config = data["app_config"]
+                        logger.info(f"Storage: Reloading app_config keys: {list(app_config.keys())}")
                         if "influxdb" in app_config:
                             self.config["influxdb"].update(app_config["influxdb"])
                         if "logging" in app_config:
                             self.config["logging"].update(app_config["logging"])
+                        if "pushover" in app_config:
+                            self.config["pushover"].update(app_config["pushover"])
                             
             # Setup InfluxDB
             influx_conf = self.config["influxdb"]

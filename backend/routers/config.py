@@ -191,6 +191,12 @@ def get_app_config():
             token = config["influxdb"]["token"]
             if token and len(token) > 0:
                 config["influxdb"]["token"] = "***REDACTED***"
+
+        if "pushover" in config:
+            if "token" in config["pushover"] and config["pushover"]["token"]:
+                config["pushover"]["token"] = "***REDACTED***"
+            if "user_key" in config["pushover"] and config["pushover"]["user_key"]:
+                config["pushover"]["user_key"] = "***REDACTED***"
         
         logger.debug("App config fetched successfully")
         return config
@@ -205,14 +211,30 @@ def update_app_config(config: dict, request: Request):
         from utils import save_app_config
         from storage import storage
         
+        # Restore secrets if redacted
+        current_config = storage.config
+        
+        # InfluxDB
+        if "influxdb" in config and config["influxdb"].get("token") == "***REDACTED***":
+            config["influxdb"]["token"] = current_config.get("influxdb", {}).get("token", "")
+            
+        # Pushover
+        if "pushover" in config:
+            if config["pushover"].get("token") == "***REDACTED***":
+                 config["pushover"]["token"] = current_config.get("pushover", {}).get("token", "")
+            if config["pushover"].get("user_key") == "***REDACTED***":
+                 config["pushover"]["user_key"] = current_config.get("pushover", {}).get("user_key", "")
+
         # Save to file
         save_app_config(config)
         
         # Reload storage config
         storage.reload_config()
         
-        logger.info("App config updated successfully")
-        return storage.config
+        logger.info(f"App config updated. Pushover enabled? {storage.config.get('pushover', {}).get('enabled')}")
+        
+        # Return masked config to prevent secret leakage
+        return get_app_config()
     except Exception as e:
         logger.error(f"Failed to update app config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save configuration: {str(e)}")

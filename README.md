@@ -16,6 +16,7 @@ A real-time network monitoring application that pings configured nodes, monitors
 - **Web-Based Configuration**: Add, edit, and remove groups/nodes/metrics directly from the UI.
 - **Flexible Storage**: SQLite for configuration/cache, optional InfluxDB for time-series data.
 - **Bootstrap Config**: Define initial topology in `config.json` for automatic seeding.
+- **Smart Notifications**: Integrated Pushover alerts with priority management and intelligent storm throttling.
 
 ## Screenshots
 
@@ -139,6 +140,15 @@ Default SNMP metric definitions are stored in `backend/snmp.json`. You can add c
 - **oid_template**: Use `{index}` placeholder for interface metrics.
 - **requires_index**: Set to `true` if the user needs to specify an index (e.g., Interface ID) or `false` for scalar values (like System Uptime).
 
+### Notifications (New)
+BeamState supports **Pushover** for mobile push notifications.
+- **Setup**: Configure your User Key and API Token in the "Settings" tab.
+- **Priority**: choose from -2 (Lowest) to 2 (Emergency). Emergency priority includes automatic retry (60s) and expiration (1h).
+- **Smart Throttling**: 
+  - Prevents "alert fatigue" during major network outages.
+  - If more than **X** nodes fail within **Y** seconds (configurable), individual alerts are paused.
+  - A single **Global Alert** summary is sent instead.
+
 Example:
 ```json
 {
@@ -184,6 +194,8 @@ BeamState/
 - **SNMP Metric Persistence** - Detailed metrics (CPU, Traffic) written to InfluxDB.
 - **Configurable Logging** - File logging with retention policy, separate system and runtime logs.
 - **Security Hardening** - Sensitive data removed from Git, API token masking.
+- **Pushover Notifications** - Configurable push alerts for node DOWN events with priority and custom templates.
+- **Smart Throttling** - Intelligent suppression of alert storms during general outages.
 
 ## Roadmap
 
@@ -197,7 +209,8 @@ BeamState/
 - [ ] **Drag and drop nodes** - Add drag and drop functionality to move nodes in a group
 
 ### Notifications
-- [ ] **Pushover Support** - Add Pushover integration for push notifications on node status changes
+- [x] **Pushover Support** - Add Pushover integration for push notifications on node status changes
+- [x] **Smart Throttling** - Prevent alert spam during mass outages
 
 ### UI/UX Improvements
 - [ ] **Mobile Config Layout** - Fix node configuration table wrapping on mobile devices (too small)

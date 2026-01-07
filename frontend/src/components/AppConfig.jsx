@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Save, RefreshCw, Database, FileText } from 'lucide-react';
+import { Save, RefreshCw, Database, FileText, Bell } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '../api';
 
@@ -17,7 +17,13 @@ const AppConfig = () => {
         try {
             setLoading(true);
             const response = await api.get('/config/app');
-            setConfig(response.data);
+            const data = response.data;
+            // Ensure sections exist
+            if (!data.pushover) data.pushover = { enabled: false, priority: 0, message_template: "Node {name} ({ip}) is DOWN" };
+            if (!data.influxdb) data.influxdb = { enabled: false };
+            if (!data.logging) data.logging = { file_enabled: false };
+            if (!data.pushover.throttling_enabled) data.pushover.throttling_enabled = false;
+            setConfig(data);
         } catch (error) {
             console.error("Failed to load app config:", error);
             toast.error("Failed to load settings");
@@ -228,6 +234,138 @@ const AppConfig = () => {
                                 <option value="ERROR">ERROR - Errors only</option>
                             </select>
                             <p className="text-xs text-slate-500">⚠️ Requires application restart to take effect.</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Pushover Notifications Configuration */}
+                <div className="bg-surface rounded-xl p-6 border border-slate-700/50">
+                    <div className="flex items-center space-x-3 mb-4">
+                        <div className="p-2 bg-orange-500/20 text-orange-400 rounded-lg">
+                            <Bell size={24} />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold text-white">Notifications</h3>
+                            <p className="text-xs text-slate-400">Pushover alerts</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="flex items-center space-x-2">
+                            <input
+                                type="checkbox"
+                                id="pushover-enabled"
+                                checked={config.pushover?.enabled || false}
+                                onChange={(e) => handleChange('pushover', 'enabled', e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="pushover-enabled" className="text-sm font-medium text-slate-200">
+                                Enable Pushover
+                            </label>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">User Key</label>
+                            <input
+                                type="password"
+                                value={config.pushover?.user_key || ''}
+                                onChange={(e) => handleChange('pushover', 'user_key', e.target.value)}
+                                placeholder="Pushover User Key"
+                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none font-mono"
+                            />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">App Token</label>
+                            <input
+                                type="password"
+                                value={config.pushover?.token || ''}
+                                onChange={(e) => handleChange('pushover', 'token', e.target.value)}
+                                placeholder="Pushover App Token"
+                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none font-mono"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-4">
+                            <div className="col-span-1 space-y-1">
+                                <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Priority</label>
+                                <select
+                                    value={config.pushover?.priority ?? 0}
+                                    onChange={(e) => handleChange('pushover', 'priority', parseInt(e.target.value))}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
+                                >
+                                    <option value="-2">-2 (Lowest)</option>
+                                    <option value="-1">-1 (Low)</option>
+                                    <option value="0">0 (Normal)</option>
+                                    <option value="1">1 (High)</option>
+                                    <option value="2">2 (Emergency)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Message Template</label>
+                            <input
+                                type="text"
+                                value={config.pushover?.message_template || ''}
+                                onChange={(e) => handleChange('pushover', 'message_template', e.target.value)}
+                                placeholder="Node {name} ({ip}) is DOWN"
+                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
+                            />
+                            <p className="text-xs text-slate-500">Available variables: {'{name}'}, {'{ip}'}</p>
+                        </div>
+
+                        {/* Smart Throttling Section */}
+                        <div className="pt-4 border-t border-slate-700/50">
+                            <h4 className="text-sm font-semibold text-white mb-3">Smart Throttling</h4>
+                            <div className="space-y-4">
+                                <div className="flex items-center space-x-2">
+                                    <input
+                                        type="checkbox"
+                                        id="throttling-enabled"
+                                        checked={config.pushover?.throttling_enabled || false}
+                                        onChange={(e) => handleChange('pushover', 'throttling_enabled', e.target.checked)}
+                                        className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-primary focus:ring-primary"
+                                    />
+                                    <label htmlFor="throttling-enabled" className="text-sm font-medium text-slate-200">
+                                        Enable Alert Throttling
+                                    </label>
+                                </div>
+
+                                {config.pushover?.throttling_enabled && (
+                                    <div className="grid grid-cols-2 gap-4 pl-6 border-l-2 border-slate-700">
+                                        <div className="space-y-1">
+                                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Threshold</label>
+                                            <div className="flex items-center space-x-2">
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    value={config.pushover?.alert_threshold || 5}
+                                                    onChange={(e) => handleChange('pushover', 'alert_threshold', parseInt(e.target.value))}
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
+                                                />
+                                                <span className="text-sm text-slate-400">alerts</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Window</label>
+                                            <div className="flex items-center space-x-2">
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    value={config.pushover?.alert_window || 60}
+                                                    onChange={(e) => handleChange('pushover', 'alert_window', parseInt(e.target.value))}
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
+                                                />
+                                                <span className="text-sm text-slate-400">seconds</span>
+                                            </div>
+                                        </div>
+                                        <p className="col-span-2 text-xs text-slate-500">
+                                            If more than <strong>{config.pushover?.alert_threshold || 5}</strong> alerts occur within <strong>{config.pushover?.alert_window || 60}</strong> seconds, individual alerts will be paused and a summary sent.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

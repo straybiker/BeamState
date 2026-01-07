@@ -7,6 +7,7 @@ from models import NodeDB, GroupDB
 from storage import storage
 from monitors import PingMonitor, SNMPMonitor, MonitorResult
 from monitors.snmp_data_collector import SNMPDataCollector
+from notifications import PushoverClient
 
 logger = logging.getLogger("BeamState.MonitorManager")
 
@@ -24,6 +25,13 @@ class MonitorManager:
         self.ping_monitor = PingMonitor()
         self.snmp_monitor = SNMPMonitor()
         self.snmp_collector = SNMPDataCollector()
+        self.snmp_collector = SNMPDataCollector()
+        self.pushover = PushoverClient()
+        
+        # Throttling state
+        self.alert_history: List[float] = [] # timestamps of recent alerts
+        self.last_storm_alert_time = 0
+
 
     def remove_node(self, node_id: int):
         if node_id in self.latest_results:
@@ -179,6 +187,9 @@ class MonitorManager:
                     # Transition to DOWN
                     new_status = "DOWN"
                     logger.error(f"Node {node.name} exceeded max retries. Marking DOWN.")
+                    
+                    # Trigger Notification
+                    asyncio.create_task(self._send_down_alert(node))
             elif current_status == "DOWN":
                 # Stay DOWN
                 new_status = "DOWN"
@@ -259,3 +270,67 @@ class MonitorManager:
             "monitored_devices": len(self.last_ping_time),
             "latest_results": list(self.latest_results.values())
         }
+
+    async def _send_down_alert(self, node: NodeDB):
+        """Send notification for DOWN node"""
+        try:
+            pushover_config = storage.config.get("pushover", {})
+            if not pushover_config.get("enabled", False):
+                logger.debug("Pushover disabled in config. Skipping alert.")
+                return
+
+            # --- Throttling Logic ---
+            throttling_enabled = pushover_config.get("throttling_enabled", False)
+            if throttling_enabled:
+                threshold = int(pushover_config.get("alert_threshold", 5))
+                window = int(pushover_config.get("alert_window", 60))
+                now = time.time()
+                
+                # Prune history
+                self.alert_history = [t for t in self.alert_history if now - t < window]
+                
+                logger.info(f"Throttling Check: History={len(self.alert_history)}, Threshold={threshold}, Window={window}")
+
+                # Check storm condition
+                if len(self.alert_history) >= threshold:
+                    logger.warning(f"Alert storm detected ({len(self.alert_history)} alerts in last {window}s). Suppressing individual alert for {node.name}.")
+                    
+                    # Send General "Outage detected" alert if not sent recently (limit to once per window)
+                    if now - self.last_storm_alert_time > window:
+                        self.last_storm_alert_time = now
+                        title = "⚠️ Global Alert: High failure rate detected"
+                        message = f"Alert Storm: {len(self.alert_history)} nodes down within {window}s. Suppressing individual alerts to prevent spam."
+                        priority = 1 # High priority
+                        
+                        # Use keys (already fetched below, so we need to move fetching up or re-fetch)
+                        token = pushover_config.get("token")
+                        user_key = pushover_config.get("user_key")
+                        if token and user_key:
+                            self.pushover.configure(token, user_key)
+                            await self.pushover.send_notification(title, message, priority)
+                    return
+                
+                # Add current to history
+                self.alert_history.append(now)
+
+            token = pushover_config.get("token")
+            user_key = pushover_config.get("user_key")
+            
+            if not token or not user_key:
+                logger.warning("Pushover enabled but credentials missing. Skipping alert.")
+                return
+
+            # Configure client
+            self.pushover.configure(token, user_key)
+            
+            # Format message
+            priority = int(pushover_config.get("priority", 0))
+            template = pushover_config.get("message_template", "Node {name} ({ip}) is DOWN")
+            
+            message = template.format(name=node.name, ip=node.ip)
+            title = f"BeamState Alert: {node.name}"
+            
+            await self.pushover.send_notification(title, message, priority)
+            
+        except Exception as e:
+            logger.error(f"Failed to trigger alert for {node.name}: {e}")

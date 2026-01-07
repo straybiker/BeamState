@@ -78,6 +78,35 @@ def save_app_config(app_config: dict):
             logger.error("config.json not found")
             return
 
+        # Validate Pushover Config
+        if "pushover" in app_config:
+            p_config = app_config["pushover"]
+            if "priority" in p_config:
+                 try:
+                     p = int(p_config["priority"])
+                     if not (-2 <= p <= 2):
+                         raise ValueError("Priority must be between -2 and 2")
+                 except ValueError:
+                     logger.warning("Invalid priority in pushover config, defaulting to 0")
+                     p_config["priority"] = 0
+            
+            # Validate Throttling
+            if "alert_threshold" in p_config:
+                try:
+                    t = int(p_config["alert_threshold"])
+                    if t < 1: raise ValueError
+                except:
+                    logger.warning("Invalid alert_threshold, defaulting to 5")
+                    p_config["alert_threshold"] = 5
+            
+            if "alert_window" in p_config:
+                try:
+                    w = int(p_config["alert_window"])
+                    if w < 1: raise ValueError
+                except:
+                    logger.warning("Invalid alert_window, defaulting to 60")
+                    p_config["alert_window"] = 60
+
         with open(CONFIG_PATH, "r") as f:
             data = json.load(f)
             

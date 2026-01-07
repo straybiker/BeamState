@@ -362,10 +362,10 @@ const Discovery = () => {
                                         <td className="p-3">
                                             <div className="flex gap-2">
                                                 {typeof device.latency === 'number' && (
-                                                    <span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs border border-blue-500/20">ICMP</span>
+                                                    <span className="bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs border border-blue-500/30">PING</span>
                                                 )}
                                                 {device.snmp_enabled && (
-                                                    <span className="bg-green-500/10 text-green-400 px-2 py-0.5 rounded text-xs border border-green-500/20">SNMP</span>
+                                                    <span className="bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded text-xs border border-purple-500/30">SNMP</span>
                                                 )}
                                                 {typeof device.latency !== 'number' && !device.snmp_enabled && (
                                                     <span className="text-slate-500 text-xs">-</span>
