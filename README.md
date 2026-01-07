@@ -140,15 +140,6 @@ Default SNMP metric definitions are stored in `backend/snmp.json`. You can add c
 - **oid_template**: Use `{index}` placeholder for interface metrics.
 - **requires_index**: Set to `true` if the user needs to specify an index (e.g., Interface ID) or `false` for scalar values (like System Uptime).
 
-### Notifications (New)
-BeamState supports **Pushover** for mobile push notifications.
-- **Setup**: Configure your User Key and API Token in the "Settings" tab.
-- **Priority**: choose from -2 (Lowest) to 2 (Emergency). Emergency priority includes automatic retry (60s) and expiration (1h).
-- **Smart Throttling**: 
-  - Prevents "alert fatigue" during major network outages.
-  - If more than **X** nodes fail within **Y** seconds (configurable), individual alerts are paused.
-  - A single **Global Alert** summary is sent instead.
-
 Example:
 ```json
 {
@@ -161,6 +152,15 @@ Example:
     "requires_index": true
 }
 ```
+
+### Notifications (New)
+BeamState supports **Pushover** for mobile push notifications.
+- **Setup**: Configure your User Key and API Token in the "Settings" tab.
+- **Priority**: choose from -2 (Lowest) to 2 (Emergency). Emergency priority includes automatic retry (60s) and expiration (1h).
+- **Smart Throttling**: 
+  - Prevents "alert fatigue" during major network outages.
+  - If more than **X** nodes fail within **Y** seconds (configurable), individual alerts are paused.
+  - A single **Global Alert** summary is sent instead.
 
 ## Tech Stack
 
@@ -188,14 +188,10 @@ BeamState/
 ## Recent Improvements
 
 ### ✅ Completed
-- **Smart Node Import** - Merges found protocols (ICMP/SNMP) into existing nodes without data loss.
 - **Enhanced Discovery UI** - Visual protocol badges and strict import filters based on scan settings.
 - **InfluxDB Integration** - Full support for time-series data storage with UI configuration.
-- **SNMP Metric Persistence** - Detailed metrics (CPU, Traffic) written to InfluxDB.
 - **Configurable Logging** - File logging with retention policy, separate system and runtime logs.
-- **Security Hardening** - Sensitive data removed from Git, API token masking.
 - **Pushover Notifications** - Configurable push alerts for node DOWN events with priority and custom templates.
-- **Smart Throttling** - Intelligent suppression of alert storms during general outages.
 
 ## Roadmap
 
@@ -215,8 +211,6 @@ BeamState/
 ### UI/UX Improvements
 - [ ] **Mobile Config Layout** - Fix node configuration table wrapping on mobile devices (too small)
 - [ ] **Auto-fill Group Interval** - When selecting a group in node config, auto-populate the group's default interval
-
-
 
 ## License
 
