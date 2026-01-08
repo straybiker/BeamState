@@ -25,6 +25,9 @@ class GroupDB(Base):
     # SNMP settings
     snmp_community = Column(String, default="public")
     snmp_port = Column(Integer, default=161)
+    
+    # Default group for new nodes
+    is_default = Column(Boolean, default=False)
 
     nodes = relationship("NodeDB", back_populates="group", cascade="all, delete-orphan")
 
@@ -145,6 +148,7 @@ class GroupBase(BaseModel):
     monitor_snmp: bool = False
     snmp_community: str = "public"
     snmp_port: int = 161
+    is_default: bool = False
 
 class GroupCreate(GroupBase):
     pass

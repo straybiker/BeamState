@@ -43,6 +43,11 @@ const Config = () => {
             const nRes = await api.get('/config/nodes');
             setGroups(gRes.data);
             setNodes(nRes.data);
+            // Auto-select default group for new nodes
+            const defaultGroup = gRes.data.find(g => g.is_default);
+            if (defaultGroup && !editingNode) {
+                setNewNode(prev => ({ ...prev, group_id: prev.group_id || defaultGroup.id }));
+            }
             // Fetch app config for default priority label
             try {
                 const appRes = await api.get('/config/app');
@@ -57,6 +62,16 @@ const Config = () => {
     useEffect(() => {
         fetchData();
     }, []);
+
+    // Update selected group in Add Node form when default group changes
+    useEffect(() => {
+        if (!editingNode && groups.length > 0) {
+            const defaultGroup = groups.find(g => g.is_default);
+            if (defaultGroup) {
+                setNewNode(prev => ({ ...prev, group_id: defaultGroup.id }));
+            }
+        }
+    }, [groups, editingNode]);
 
     const handleCreateGroup = async (e) => {
         e.preventDefault();
@@ -226,6 +241,19 @@ const Config = () => {
         } catch (e) {
             console.error(e);
             toast.error("Failed to update group status");
+        }
+    };
+
+    const handleToggleDefault = async (group) => {
+        try {
+            // Toggle: if already default, unset; otherwise set as default
+            const newIsDefault = !group.is_default;
+            await api.put(`/config/groups/${group.id}`, { ...group, is_default: newIsDefault });
+            toast.success(newIsDefault ? `${group.name} set as default` : `Default group cleared`);
+            fetchData();
+        } catch (e) {
+            console.error(e);
+            toast.error("Failed to update default group");
         }
     };
 
@@ -417,6 +445,7 @@ const Config = () => {
                                     <th className="px-4 py-3 cursor-pointer hover:text-white" onClick={() => requestSort('interval')}>
                                         <div className="flex items-center">Default Interval <ArrowUpDown size={14} className="ml-1" /></div>
                                     </th>
+                                    <th className="px-4 py-3 text-center">Default</th>
                                     <th className="px-4 py-3 rounded-tr-lg text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -425,6 +454,16 @@ const Config = () => {
                                     <tr key={g.id} className="hover:bg-slate-800/30 transition-colors">
                                         <td className="px-4 py-3 font-medium">{g.name}</td>
                                         <td className="px-4 py-3">{g.interval}s</td>
+                                        <td className="px-4 py-3 text-center">
+                                            <input
+                                                type="radio"
+                                                name="defaultGroup"
+                                                checked={g.is_default || false}
+                                                onChange={() => handleToggleDefault(g)}
+                                                className="w-4 h-4 cursor-pointer"
+                                                style={{ accentColor: '#3b82f6' }}
+                                            />
+                                        </td>
                                         <td className="px-4 py-3 text-right">
                                             <div className="flex items-center justify-end gap-2">
                                                 <button onClick={() => handleToggleGroup(g)} className="bg-slate-700/50 hover:bg-slate-700 p-1 rounded transition-colors" title={g.enabled === false ? "Start Group" : "Pause Group"}>
@@ -508,7 +547,7 @@ const Config = () => {
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Interval</label>
                                 <input
                                     type="number"
-                                    placeholder="Def"
+                                    placeholder={groups.find(g => g.id === newNode.group_id)?.interval?.toString() || "Def"}
                                     className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
                                     value={newNode.interval} onChange={e => setNewNode({ ...newNode, interval: e.target.value })}
                                 />
@@ -539,7 +578,8 @@ const Config = () => {
                                         type="checkbox"
                                         checked={newNode.monitor_ping}
                                         onChange={e => setNewNode({ ...newNode, monitor_ping: e.target.checked })}
-                                        className="w-4 h-4 text-primary bg-slate-900 border-slate-700 rounded focus:ring-2 focus:ring-primary"
+                                        className="w-4 h-4"
+                                        style={{ accentColor: '#3b82f6' }}
                                     />
                                     <span className="text-white">ICMP Ping</span>
                                 </label>
@@ -548,7 +588,8 @@ const Config = () => {
                                         type="checkbox"
                                         checked={newNode.monitor_snmp}
                                         onChange={e => setNewNode({ ...newNode, monitor_snmp: e.target.checked })}
-                                        className="w-4 h-4 text-primary bg-slate-900 border-slate-700 rounded focus:ring-2 focus:ring-primary"
+                                        className="w-4 h-4"
+                                        style={{ accentColor: '#3b82f6' }}
                                     />
                                     <span className="text-white">SNMP</span>
                                 </label>

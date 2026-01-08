@@ -60,6 +60,10 @@ def update_group(group_id: str, group: GroupCreate, request: Request, db: Sessio
     # Update fields
     for key, value in group.model_dump().items():
         setattr(db_group, key, value)
+    
+    # If this group is being set as default, clear is_default from all other groups
+    if group.is_default:
+        db.query(GroupDB).filter(GroupDB.id != group_id).update({GroupDB.is_default: False})
         
     db.commit()
     db.refresh(db_group)

@@ -63,6 +63,12 @@ async def lifespan(app: FastAPI):
         if 'notification_priority' not in columns:
             cursor.execute('ALTER TABLE nodes ADD COLUMN notification_priority INTEGER')
             logger.info("Migration: Added notification_priority column to nodes table")
+        # Check if is_default column exists in groups, add if not
+        cursor.execute("PRAGMA table_info(groups)")
+        group_columns = [col[1] for col in cursor.fetchall()]
+        if 'is_default' not in group_columns:
+            cursor.execute('ALTER TABLE groups ADD COLUMN is_default BOOLEAN DEFAULT 0')
+            logger.info("Migration: Added is_default column to groups table")
         conn.commit()
         conn.close()
     except Exception as e:
