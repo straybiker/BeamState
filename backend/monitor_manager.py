@@ -324,7 +324,9 @@ class MonitorManager:
             self.pushover.configure(token, user_key)
             
             # Format message
-            priority = int(pushover_config.get("priority", 0))
+            # Use node-specific priority if set, otherwise fall back to global
+            global_priority = int(pushover_config.get("priority", 0))
+            priority = node.notification_priority if node.notification_priority is not None else global_priority
             template = pushover_config.get("message_template", "Node {name} ({ip}) is DOWN")
             
             message = template.format(name=node.name, ip=node.ip)

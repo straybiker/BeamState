@@ -31,9 +31,11 @@ const Config = () => {
         monitor_ping: true,
         monitor_snmp: false,
         snmp_community: '',
-        snmp_port: ''
+        snmp_port: '',
+        notification_priority: null
     });
     const [editingNode, setEditingNode] = useState(null); // Track which node is being edited
+    const [appConfig, setAppConfig] = useState({ pushover: { priority: 0 } }); // For default priority label
 
     const fetchData = async () => {
         try {
@@ -41,6 +43,11 @@ const Config = () => {
             const nRes = await api.get('/config/nodes');
             setGroups(gRes.data);
             setNodes(nRes.data);
+            // Fetch app config for default priority label
+            try {
+                const appRes = await api.get('/config/app');
+                setAppConfig(appRes.data);
+            } catch (e) { /* ignore */ }
         } catch (error) {
             console.error("Error fetching config:", error);
             toast.error("Failed to load configuration");
@@ -135,6 +142,11 @@ const Config = () => {
     };
 
     const handleEditNode = (node) => {
+        // If clicking the same node, cancel edit mode
+        if (editingNode && editingNode.id === node.id) {
+            handleCancelEdit();
+            return;
+        }
         setEditingNode(node);
         setNewNode({
             name: node.name,
@@ -145,7 +157,8 @@ const Config = () => {
             monitor_ping: node.monitor_ping !== null ? node.monitor_ping : true,
             monitor_snmp: node.monitor_snmp !== null ? node.monitor_snmp : false,
             snmp_community: node.snmp_community || '',
-            snmp_port: node.snmp_port !== null ? node.snmp_port.toString() : ''
+            snmp_port: node.snmp_port !== null ? node.snmp_port.toString() : '',
+            notification_priority: node.notification_priority !== null ? node.notification_priority : null
         });
     };
 
@@ -160,7 +173,8 @@ const Config = () => {
             monitor_ping: true,
             monitor_snmp: false,
             snmp_community: '',
-            snmp_port: ''
+            snmp_port: '',
+            notification_priority: null
         });
     };
 
@@ -436,20 +450,32 @@ const Config = () => {
                         <h3 className="text-xl font-semibold text-slate-100">
                             {editingNode ? `Edit Node: ${editingNode.name}` : 'Nodes'}
                         </h3>
-                        {editingNode && (
-                            <button
-                                onClick={handleCancelEdit}
-                                className="text-sm text-slate-400 hover:text-white transition-colors"
-                            >
-                                Cancel Edit
-                            </button>
-                        )}
+                        <div className="flex gap-2">
+                            {editingNode ? (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelEdit}
+                                        className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button type="submit" form="nodeForm" className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors">
+                                        Update Node
+                                    </button>
+                                </>
+                            ) : (
+                                <button type="submit" form="nodeForm" className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors flex items-center justify-center">
+                                    <Plus size={18} className="mr-2" /> Add Node
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     {/* Create/Edit Node Form */}
-                    <form onSubmit={handleCreateOrUpdateNode} className={`grid grid-cols-1 gap-4 p-4 rounded-lg border ${editingNode ? 'bg-blue-900/20 border-blue-500/30' : 'bg-slate-800/50 border-slate-700/50'}`}>
-                        {/* Basic Info Row */}
-                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                    <form id="nodeForm" onSubmit={handleCreateOrUpdateNode} className={`grid grid-cols-1 gap-4 p-4 rounded-lg border ${editingNode ? 'bg-blue-900/20 border-blue-500/30' : 'bg-slate-800/50 border-slate-700/50'}`}>
+                        {/* Basic Info Row - Full Width */}
+                        <div className="grid grid-cols-2 md:grid-cols-12 gap-4 items-end">
                             <div className="col-span-1 md:col-span-3">
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Name</label>
                                 <input
@@ -479,7 +505,7 @@ const Config = () => {
                                 </select>
                             </div>
                             <div className="col-span-1 md:col-span-2">
-                                <label className="block text-sm font-medium text-slate-400 mb-1">Interval (Opt)</label>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Interval</label>
                                 <input
                                     type="number"
                                     placeholder="Def"
@@ -487,32 +513,22 @@ const Config = () => {
                                     value={newNode.interval} onChange={e => setNewNode({ ...newNode, interval: e.target.value })}
                                 />
                             </div>
-                            <div className="col-span-1 md:col-span-2">
-                                {editingNode && (
-                                    <button
-                                        type="button"
-                                        onClick={handleCancelEdit}
-                                        className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md transition-colors"
-                                    >
-                                        Cancel
-                                    </button>
-                                )}
-                                {!editingNode && (
-                                    <button type="submit" className="w-full bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors flex items-center justify-center">
-                                        <Plus size={18} className="mr-2" /> Add Node
-                                    </button>
-                                )}
+                            <div className="col-span-2 md:col-span-2">
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Alert Priority</label>
+                                <select
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                    value={newNode.notification_priority === null ? '' : newNode.notification_priority}
+                                    onChange={e => setNewNode({ ...newNode, notification_priority: e.target.value === '' ? null : parseInt(e.target.value) })}
+                                >
+                                    <option value="">Default ({appConfig?.pushover?.priority === -2 ? 'Lowest' : appConfig?.pushover?.priority === -1 ? 'Low' : appConfig?.pushover?.priority === 0 ? 'Normal' : appConfig?.pushover?.priority === 1 ? 'High' : appConfig?.pushover?.priority === 2 ? 'Emergency' : 'Normal'})</option>
+                                    <option value="-2">-2 Lowest</option>
+                                    <option value="-1">-1 Low</option>
+                                    <option value="0">0 Normal</option>
+                                    <option value="1">1 High</option>
+                                    <option value="2">2 Emergency</option>
+                                </select>
                             </div>
                         </div>
-
-                        {/* Update button for editing mode - separate row */}
-                        {editingNode && (
-                            <div className="flex justify-end">
-                                <button type="submit" className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-md transition-colors">
-                                    Update Node
-                                </button>
-                            </div>
-                        )}
 
                         {/* Protocol Selection */}
                         <div className="border-t border-slate-700 pt-4">

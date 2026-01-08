@@ -156,7 +156,8 @@ Example:
 ### Notifications (New)
 BeamState supports **Pushover** for mobile push notifications.
 - **Setup**: Configure your User Key and API Token in the "Settings" tab.
-- **Priority**: choose from -2 (Lowest) to 2 (Emergency). Emergency priority includes automatic retry (60s) and expiration (1h).
+- **Priority**: Choose from -2 (Lowest) to 2 (Emergency). Emergency priority includes automatic retry (60s) and expiration (1h).
+- **Per-Node Priority**: Override the global priority on individual nodes for granular control.
 - **Smart Throttling**: 
   - Prevents "alert fatigue" during major network outages.
   - If more than **X** nodes fail within **Y** seconds (configurable), individual alerts are paused.
@@ -188,6 +189,8 @@ BeamState/
 ## Recent Improvements
 
 ### ✅ Completed
+- **Per-Node Alert Priority** - Override global notification priority on individual nodes.
+- **Security Hardening** - Fixed secret leakage in API responses, dependency CVE patches.
 - **Enhanced Discovery UI** - Visual protocol badges and strict import filters based on scan settings.
 - **InfluxDB Integration** - Full support for time-series data storage with UI configuration.
 - **Configurable Logging** - File logging with retention policy, separate system and runtime logs.

@@ -51,6 +51,23 @@ async def lifespan(app: FastAPI):
     logger.info("BeamState Backend Starting...")
     init_db()
     
+    # Run database migrations for new columns
+    try:
+        import sqlite3
+        db_path = os.path.join(os.path.dirname(__file__), 'data', 'beamstate.db')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        # Check if notification_priority column exists, add if not
+        cursor.execute("PRAGMA table_info(nodes)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'notification_priority' not in columns:
+            cursor.execute('ALTER TABLE nodes ADD COLUMN notification_priority INTEGER')
+            logger.info("Migration: Added notification_priority column to nodes table")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Database migration check failed (may be first run): {e}")
+    
     # Run Startup Cleanup & Sync
     try:
         db = SessionLocal()

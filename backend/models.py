@@ -48,6 +48,9 @@ class NodeDB(Base):
     # SNMP overrides
     snmp_community = Column(String, nullable=True)
     snmp_port = Column(Integer, nullable=True)
+    
+    # Notification overrides
+    notification_priority = Column(Integer, nullable=True)  # -2 to 2, None = use app default
 
     group = relationship("GroupDB", back_populates="nodes")
     node_metrics = relationship("NodeMetricDB", back_populates="node", cascade="all, delete-orphan")
@@ -108,6 +111,7 @@ class NodeBase(BaseModel):
     monitor_snmp: Optional[bool] = None
     snmp_community: Optional[str] = None
     snmp_port: Optional[int] = None
+    notification_priority: Optional[int] = None  # -2 to 2, None = use app default
     
     @field_validator('ip')
     @classmethod
