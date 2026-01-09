@@ -80,6 +80,80 @@ const Dashboard = () => {
                 />
             </header>
 
+            {/* Summary Stats */}
+            {(() => {
+                let stats = { up: 0, down: 0, warning: 0, paused: 0, total: 0 };
+                groups.forEach(group => {
+                    const groupResults = resultsByGroup[group.name] || [];
+                    const resultsMap = new Map(groupResults.map(r => [r.node_id, r]));
+                    const nodes = group.nodes || [];
+
+                    nodes.forEach(node => {
+                        stats.total++;
+                        // If group is paused, node is effectively paused unless status says otherwise? 
+                        // Actually backend status handles group pause. 
+                        // But if no status yet, and group paused, it's paused.
+
+                        const statusNode = resultsMap.get(node.id);
+                        let status = 'WAITING';
+
+                        if (statusNode) {
+                            status = statusNode.status;
+                        } else if (group.enabled === false) {
+                            status = 'PAUSED';
+                        }
+
+                        if (status === 'UP') stats.up++;
+                        else if (status === 'DOWN') stats.down++;
+                        else if (status === 'PENDING') stats.warning++;
+                        else if (status === 'PAUSED') stats.paused++;
+                        // WAITING counts towards total but not specific buckets here, or maybe warning?
+                        // Let's treat WAITING as warning/pending for now or just ignore
+                    });
+                });
+
+                return (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                        <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-green-500/10">
+                                    <Wifi size={20} className="text-green-400" />
+                                </div>
+                                <div className="text-slate-400 text-sm font-semibold uppercase tracking-wider">Up</div>
+                            </div>
+                            <div className="text-2xl font-bold text-green-400 leading-none">{stats.up}</div>
+                        </div>
+                        <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-red-500/10">
+                                    <WifiOff size={20} className="text-red-400" />
+                                </div>
+                                <div className="text-slate-400 text-sm font-semibold uppercase tracking-wider">Down</div>
+                            </div>
+                            <div className="text-2xl font-bold text-red-400 leading-none">{stats.down}</div>
+                        </div>
+                        <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-orange-500/10">
+                                    <Clock size={20} className="text-orange-400" />
+                                </div>
+                                <div className="text-slate-400 text-sm font-semibold uppercase tracking-wider">Warning</div>
+                            </div>
+                            <div className="text-2xl font-bold text-orange-400 leading-none">{stats.warning}</div>
+                        </div>
+                        <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-slate-500/10">
+                                    <PauseCircle size={20} className="text-slate-400" />
+                                </div>
+                                <div className="text-slate-400 text-sm font-semibold uppercase tracking-wider">Paused</div>
+                            </div>
+                            <div className="text-2xl font-bold text-slate-400 leading-none">{stats.paused}</div>
+                        </div>
+                    </div>
+                );
+            })()}
+
             {groups.length === 0 && (
                 <div className="bg-surface p-6 rounded-lg text-center text-slate-400 border border-slate-700">
                     No groups configured. Go to Configuration to add groups.
