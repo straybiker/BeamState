@@ -15,7 +15,7 @@ const Layout = ({ children }) => {
     return (
         <div className="min-h-screen flex flex-col md:flex-row">
             {/* Sidebar / Mobile Header */}
-            <nav className="bg-surface p-4 md:w-64 md:h-screen flex md:flex-col justify-between items-center md:items-stretch border-r border-slate-700 shadow-lg z-10">
+            <nav className="bg-surface p-4 md:w-64 md:h-screen md:sticky md:top-0 flex md:flex-col justify-between items-center md:items-stretch border-r border-slate-700 shadow-lg z-10">
                 <div className="flex items-center space-x-2 mb-0 md:mb-8">
                     <img src="/logo_transparant.png" alt="Logo" className="h-10 object-contain" />
                     <div>
