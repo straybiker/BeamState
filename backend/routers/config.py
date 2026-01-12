@@ -72,13 +72,23 @@ def update_group(group_id: str, group: GroupCreate, request: Request, db: Sessio
     save_config(db)
     
     # Trigger immediate check for all nodes in group if it was just unpaused
-    if was_paused and will_be_enabled:
-        if hasattr(request.app.state, "pinger"):
+    # Trigger immediate check (unpause) or set status (pause)
+    if hasattr(request.app.state, "pinger"):
+        if was_paused and will_be_enabled:
+            # Unpausing: Trigger immediate checks
             nodes = db.query(NodeDB).filter(NodeDB.group_id == group_id).all()
             for node in nodes:
                 if node.enabled:  # Only trigger for enabled nodes
                     request.app.state.pinger.trigger_immediate_check(str(node.id))
             logger.info(f"Group {db_group.name} unpaused - triggering immediate checks for {len(nodes)} nodes")
+        
+        elif not will_be_enabled and (not was_paused): # Just paused
+             # Pausing: Set status immediately
+             nodes = db.query(NodeDB).filter(NodeDB.group_id == group_id).all()
+             for node in nodes:
+                 # We must ensure the node object has the group loaded/associated for the helper to work
+                 node.group = db_group 
+                 request.app.state.pinger.set_paused(node)
     
     return db_group
 
@@ -150,10 +160,16 @@ def update_node(node_id: str, node: NodeCreate, request: Request, db: Session = 
     save_config(db)
     
     # Trigger immediate check if node was just unpaused
-    if was_paused and will_be_enabled:
-        if hasattr(request.app.state, "pinger"):
+    # Trigger immediate check (unpause) or set status (pause)
+    if hasattr(request.app.state, "pinger"):
+        if was_paused and will_be_enabled:
             request.app.state.pinger.trigger_immediate_check(node_id)
             logger.info(f"Node {db_node.name} unpaused - triggering immediate check")
+        elif not will_be_enabled and (not was_paused):
+            # Ensure group is loaded
+            if not db_node.group:
+                 db_node.group = db.query(GroupDB).filter(GroupDB.id == db_node.group_id).first()
+            request.app.state.pinger.set_paused(db_node)
     
     return db_node
 

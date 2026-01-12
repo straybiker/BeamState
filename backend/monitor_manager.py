@@ -53,10 +53,33 @@ class MonitorManager:
     
     def trigger_immediate_check(self, node_id: str):
         """Trigger an immediate check for a specific node (e.g., when unpausing)"""
-        if node_id in self.last_ping_time:
+        node_id_int = int(node_id)
+        if node_id_int in self.last_ping_time:
             # Reset the last ping time to 0 to force immediate check on next loop iteration
-            self.last_ping_time[node_id] = 0
+            self.last_ping_time[node_id_int] = 0
             logger.info(f"Triggered immediate check for node {node_id}")
+
+    def set_paused(self, node: NodeDB):
+        """Immediately force a node's status to PAUSED in the cache"""
+        now = time.time()
+        self.latest_results[node.id] = {
+            "node_id": node.id,
+            "node_name": node.name,
+            "ip": node.ip,
+            "group_name": node.group.name if node.group else "Unknown",
+            "status": "PAUSED",
+            "latency": None,
+            "packet_loss": 0,
+            "timestamp": now,
+            "monitor_ping": False,
+            "monitor_snmp": False
+        }
+        # Also clear any failure state so it doesn't resume as PENDING/DOWN later
+        if node.id in self.node_states:
+            self.node_states[node.id]["status"] = "PAUSED"
+            self.node_states[node.id]["failure_count"] = 0
+            
+        logger.info(f"Node {node.name} status forced to PAUSED")
 
     async def process_node_with_limit(self, node: NodeDB):
         """Process a node with semaphore to limit concurrent sockets"""
