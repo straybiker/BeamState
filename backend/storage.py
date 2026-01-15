@@ -39,11 +39,11 @@ class Storage:
                 "token": "",
                 "user_key": "",
                 "priority": 0,
-                "priority": 0,
                 "message_template": "Node {name} ({ip}) is DOWN",
                 "throttling_enabled": False,
                 "alert_threshold": 5,
-                "alert_window": 60
+                "alert_window": 60,
+                "maintenance_mode": False
             }
         }
         

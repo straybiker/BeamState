@@ -264,6 +264,23 @@ const AppConfig = () => {
                             </label>
                         </div>
 
+                        {/* Maintenance Mode Toggle */}
+                        <div className="flex items-center space-x-2 pl-6 border-l-2 border-slate-700">
+                            <input
+                                type="checkbox"
+                                id="maintenance-mode"
+                                checked={config.pushover?.maintenance_mode || false}
+                                onChange={(e) => handleChange('pushover', 'maintenance_mode', e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-amber-500 focus:ring-amber-500"
+                            />
+                            <div>
+                                <label htmlFor="maintenance-mode" className="text-sm font-medium text-amber-500 block">
+                                    Maintenance Mode
+                                </label>
+                                <p className="text-xs text-slate-400">Suppress ALL notifications while active</p>
+                            </div>
+                        </div>
+
                         <div className="space-y-1">
                             <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">User Key</label>
                             <input

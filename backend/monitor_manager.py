@@ -53,12 +53,14 @@ class MonitorManager:
     
     def trigger_immediate_check(self, node_id: str):
         """Trigger an immediate check for a specific node (e.g., when unpausing)"""
-        node_id_int = int(node_id)
-        if node_id_int in self.last_ping_time:
+        if node_id in self.last_ping_time:
             # Reset the last ping time to 0 to force immediate check on next loop iteration
-            self.last_ping_time[node_id_int] = 0
+            self.last_ping_time[node_id] = 0
             logger.info(f"Triggered immediate check for node {node_id}")
-
+        else:
+            # If not in cache, add it with 0 so it runs immediately
+            self.last_ping_time[node_id] = 0
+            logger.info(f"Node {node_id} not in ping cache, added for immediate check")
     def set_paused(self, node: NodeDB):
         """Immediately force a node's status to PAUSED in the cache"""
         now = time.time()
@@ -301,6 +303,23 @@ class MonitorManager:
             if not pushover_config.get("enabled", False):
                 logger.debug("Pushover disabled in config. Skipping alert.")
                 return
+
+            # Check maintenance mode
+            m_mode = pushover_config.get("maintenance_mode", False)
+            
+            # Write debug trace
+            try:
+                with open("debug_trace.txt", "a") as f:
+                    f.write(f"Alert Check: maintenance_mode={m_mode}, keys={list(pushover_config.keys())}\n")
+            except:
+                pass
+
+            if m_mode:
+                logger.warning(f"Maintenance Mode Active: Suppressing alert for {node.name}")
+                return
+            
+            logger.debug(f"Pushover Config Check: keys={list(pushover_config.keys())}, maintenance_mode={m_mode}")
+
 
             # --- Throttling Logic ---
             throttling_enabled = pushover_config.get("throttling_enabled", False)

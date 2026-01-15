@@ -8,12 +8,17 @@ const Dashboard = () => {
     const [groups, setGroups] = useState([]); // Store groups configuration
     const [loading, setLoading] = useState(true);
     const [activeFilter, setActiveFilter] = useState(null);
+    const [appConfig, setAppConfig] = useState(null);
 
     const fetchData = async () => {
         try {
             // Fetch groups config to ensure we show all groups (even empty ones)
             const groupsRes = await api.get('/config/groups');
             setGroups(groupsRes.data);
+
+            // Fetch app config for maintenance mode check
+            const appConfigRes = await api.get('/config/app');
+            setAppConfig(appConfigRes.data);
 
             // Fetch pinger status which includes latest results
             const statusRes = await api.get('/status');
@@ -40,6 +45,15 @@ const Dashboard = () => {
         }
     };
 
+    const fetchAppConfig = async () => {
+        try {
+            const appConfigRes = await api.get('/config/app');
+            setAppConfig(appConfigRes.data);
+        } catch (error) {
+            console.error("Poll error app config:", error);
+        }
+    };
+
     useEffect(() => {
         fetchData();
         // Poll status periodically
@@ -47,9 +61,10 @@ const Dashboard = () => {
             fetchStatusOnly();
         }, 5000);
 
-        // Poll configuration periodically to catch added/removed nodes
+        // Poll configuration periodically to catch added/removed nodes and maintenance mode
         const configInterval = setInterval(() => {
             api.get('/config/groups').then(res => setGroups(res.data)).catch(e => console.error(e));
+            fetchAppConfig();
         }, 5000);
 
         return () => {
@@ -111,6 +126,19 @@ const Dashboard = () => {
                     className="h-16 object-contain"
                 />
             </header>
+
+            {/* Maintenance Mode Banner */}
+            {appConfig?.pushover?.maintenance_mode && (
+                <div className="bg-amber-500/10 border border-amber-500/20 text-amber-200 px-6 py-4 rounded-xl mb-8 flex items-center shadow-lg shadow-amber-900/10">
+                    <div className="p-2 bg-amber-500/20 rounded-lg mr-4">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></svg>
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-bold text-amber-400">Maintenance Mode Active</h3>
+                        <p className="text-sm opacity-80">All notifications are currently suppressed. Monitoring and data logging will continue as normal.</p>
+                    </div>
+                </div>
+            )}
 
             {/* Summary Stats / Filter Controls */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
