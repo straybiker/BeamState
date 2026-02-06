@@ -53,36 +53,31 @@ class MetricProcessor:
         except Exception as e:
             logger.error(f"Failed to save alert states: {e}")
 
-    def get_node_alert_status(self, node: NodeDB) -> str:
+    def get_node_alert_status(self, node: NodeDB) -> tuple[str, Optional[str]]:
         """
         Calculates the aggregated status for a node based on active metric alerts.
-        Returns: 'DOWN' (Critical), 'PENDING' (Warning), or 'UP' (Normal)
+        Returns: (status, offending_metric_id)
+        Status: 'DOWN' (Critical), 'PENDING' (Warning), or 'UP' (Normal)
         """
         status = "UP"
+        offending_metric_id = None
+        
         if not node.node_metrics:
-            return status
+            return status, None
 
         # Access persisted alerts directly from memory
-        # No lock needed for read if we accept slight staleness, or use lock if strict
-        # Using self.alert_states directly (it's a dict, atomic enough for this)
-        
-        has_critical = False
-        has_warning = False
-        
         for metric in node.node_metrics:
             alert_level = self.alert_states.get(metric.id)
             if alert_level == "CRITICAL":
-                has_critical = True
-                break # Optimization: Critical is highest severity
+                # Critical takes precedence immediately
+                return "DOWN", metric.id
             elif alert_level == "WARNING":
-                has_warning = True
+                # Warning is set, but continue checking for Critical
+                status = "PENDING"
+                if offending_metric_id is None:
+                    offending_metric_id = metric.id
                 
-        if has_critical:
-            status = "DOWN"
-        elif has_warning:
-            status = "PENDING"
-            
-        return status
+        return status, offending_metric_id
 
     async def process_metric(self, node: NodeDB, node_metric: NodeMetricDB, value: Any) -> Optional[dict]:
         """

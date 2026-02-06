@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import Config from './components/Config';
 import Discovery from './components/Discovery';
+import StateTrace from './components/StateTrace';
 
 import MetricsDashboard from './components/MetricsDashboard';
 
@@ -14,6 +15,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/metrics" element={<MetricsDashboard />} />
+          <Route path="/trace" element={<StateTrace />} />
           <Route path="/config" element={<Config />} />
           <Route path="/discovery" element={<Discovery />} />
         </Routes>

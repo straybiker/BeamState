@@ -10,6 +10,7 @@ from monitors.snmp_data_collector import SNMPDataCollector
 from notifications import PushoverClient
 from metrics_processor import MetricProcessor
 from models import MetricDefinitionDB, NodeMetricDB
+from trace_manager import trace_manager, TraceEvent
 
 logger = logging.getLogger("BeamState.MonitorManager")
 
@@ -208,7 +209,8 @@ class MonitorManager:
             new_status = "UP"
             
             # Check if metric alerts override status
-            metric_status = self.metric_processor.get_node_alert_status(node)
+            # Check if metric alerts override status
+            metric_status, offending_metric_id = self.metric_processor.get_node_alert_status(node)
             if metric_status == "DOWN":
                 new_status = "DOWN"
             elif metric_status == "PENDING":
@@ -216,6 +218,37 @@ class MonitorManager:
             
             if current_status != new_status:
                 logger.info(f"Node {node.name} status changed: {current_status} -> {new_status} (Reachability: OK, Metric Alert: {metric_status})")
+                
+                # Determine detailed reason
+                reason = f"Reachability OK"
+                if metric_status != "UP":
+                    reason = f"Metric alert: {metric_status}"
+                    if offending_metric_id:
+                        metric = next((m for m in node.node_metrics if m.id == offending_metric_id), None)
+                        if metric:
+                            current_data = self.snmp_collector.current_values.get(offending_metric_id)
+                            if current_data:
+                                val = current_data.get("processed_value")
+                                if isinstance(val, (int, float)):
+                                    val_str = f"{val:.2f}"
+                                else:
+                                    val_str = str(val)
+                                    
+                                unit = metric.metric_definition.unit or ""
+                                threshold = metric.critical_threshold if metric_status == "DOWN" else metric.warning_threshold
+                                cond = getattr(metric, 'alert_condition', 'gt') or 'gt'
+                                symbol = ">" if cond == 'gt' else "<"
+                                reason = f"{metric.metric_definition.name}: {val_str}{unit} ({symbol} {threshold})"
+                asyncio.create_task(trace_manager.emit(TraceEvent(
+                    timestamp=time.time(),
+                    node_id=node.id,
+                    node_name=node.name,
+                    ip=node.ip,
+                    group_name=node.group.name,
+                    old_status=current_status,
+                    new_status=new_status,
+                    reason=reason
+                )))
                 
             state["failure_count"] = 0 # Reset failure count for reachability
             state["first_failure_time"] = 0
@@ -225,6 +258,17 @@ class MonitorManager:
                 # Transition to PENDING
                 new_status = "PENDING"
                 state["failure_count"] = 1
+                # Emit trace event for UP -> PENDING
+                asyncio.create_task(trace_manager.emit(TraceEvent(
+                    timestamp=time.time(),
+                    node_id=node.id,
+                    node_name=node.name,
+                    ip=node.ip,
+                    group_name=node.group.name,
+                    old_status=current_status,
+                    new_status=new_status,
+                    reason="Check failed, entering retry state"
+                )))
                 state["first_failure_time"] = now
                 logger.warning(f"Node {node.name} check failed. Entering PENDING state (Retry 1/{max_retries})")
             elif current_status == "PENDING":
@@ -234,6 +278,17 @@ class MonitorManager:
                     # Transition to DOWN
                     new_status = "DOWN"
                     logger.error(f"Node {node.name} exceeded max retries. Marking DOWN.")
+                    # Emit trace event for PENDING -> DOWN
+                    asyncio.create_task(trace_manager.emit(TraceEvent(
+                        timestamp=time.time(),
+                        node_id=node.id,
+                        node_name=node.name,
+                        ip=node.ip,
+                        group_name=node.group.name,
+                        old_status="PENDING",
+                        new_status="DOWN",
+                        reason=f"Exceeded max retries ({max_retries})"
+                    )))
                     
                     # Trigger Notification
                     asyncio.create_task(self._send_down_alert(node))

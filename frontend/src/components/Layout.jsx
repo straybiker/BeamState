@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, Settings, Server, Network } from 'lucide-react';
+import { Activity, Settings, Server, Network, FileText } from 'lucide-react';
 
 const Layout = ({ children }) => {
     const location = useLocation();
@@ -8,6 +8,7 @@ const Layout = ({ children }) => {
     const navItems = [
         { name: 'Dashboard', path: '/', icon: Activity },
         { name: 'Metrics', path: '/metrics', icon: Server },
+        { name: 'Trace', path: '/trace', icon: FileText },
         { name: 'Discovery', path: '/discovery', icon: Network },
         { name: 'Configuration', path: '/config', icon: Settings },
     ];
