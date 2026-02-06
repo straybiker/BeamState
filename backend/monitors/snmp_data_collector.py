@@ -16,8 +16,14 @@ class SNMPDataCollector:
         # Current metric values: {node_metric_id: {'value': val, 'rate': rate, 'timestamp': ts}}
         self.current_values = {}
         # Previous raw values for delta calc: {node_metric_id: {'value': val, 'timestamp': ts}}
-        self.previous_values = {} 
-        self.snmp_engine = SnmpEngine()        
+        # Note: Rate calc moved to MetricProcessor, but we might keep this if needed or just remove.
+        # Ideally, MetricProcessor handles it.
+        self.metric_processor = None
+        self.snmp_engine = SnmpEngine()   
+        
+    def set_processor(self, processor):
+        self.metric_processor = processor
+
     async def start(self):
         """Start the collector service"""
         self.running = True
@@ -51,12 +57,12 @@ class SNMPDataCollector:
                 finally:
                     db.close()
                     
-                # Sleep for 10s (reduced for testing responsiveness)
-                await asyncio.sleep(10) 
+                # Sleep for 60s (production interval)
+                await asyncio.sleep(60) 
                 
             except Exception as e:
                 logger.error(f"Error in main collection loop: {e}")
-                await asyncio.sleep(10)
+                await asyncio.sleep(60)
     
     async def collect_node_metrics(self, node_id: str):
         """Collect all enabled metrics for a specific node"""
@@ -135,83 +141,20 @@ class SNMPDataCollector:
             return None
             
     async def store_metric_value(self, node: NodeDB, node_metric: NodeMetricDB, value: str):
-        """Store the latest metric value in memory, calculate rate, and persist to storage"""
-        now = time.time()
-        metric_def = node_metric.metric_definition
-        node_metric_id = node_metric.id
-        metric_type = metric_def.metric_type
-        unit = metric_def.unit
-        
-        entry = {
-            "value": value,
-            "timestamp": now,
-            "rate": None
-        }
-        
-        # Value to store in InfluxDB 
-        # (for counters, we prefer rate if available, otherwise raw delta or simply allow flexible query)
-        # Actually, standard practice for InfluxDB: store the raw COUNTER value, let InfluxQL/Flux calculate derivative.
-        # BUT, because counters reset/wrap, and we want easy querying, storing the calculated rate is often friendlier 
-        # for simple dashboards. Let's store BOTH if possible, or just the useful one.
-        #
-        # Decision: Store the calculated RATE for counters (bps), and raw VALUE for gauges (cpu %).
-        persist_value = None
-        
-        try:
-             float_val = float(value)
-             persist_value = float_val
-        except:
-             pass
+        """Store the latest metric value using MetricProcessor"""
+        if not self.metric_processor:
+            return
 
-        # Rate Calculation Logic
-        if metric_type == 'counter':
-            prev = self.previous_values.get(node_metric_id)
-            if prev:
-                try:
-                    cur_val = float(value)
-                    prev_val = float(prev['value'])
-                    time_delta = now - prev['timestamp']
-                    
-                    if time_delta > 0:
-                        val_delta = cur_val - prev_val
-                        # Handle Wrap-around (simple 32/64 bit detection or just ignore negative)
-                        if val_delta >= 0:
-                            # Formula for Bytes -> Bits/sec
-                            if unit == 'bytes':
-                                rate = (val_delta * 8) / time_delta
-                            else:
-                                rate = val_delta / time_delta
-                            
-                            entry['rate'] = rate
-                            persist_value = rate # For counters, we often care about the rate
-                            
-                except (ValueError, TypeError):
-                    pass
-            
-            # Update previous value store
-            self.previous_values[node_metric_id] = {
-                "value": value,
-                "timestamp": now
-            }
-            
-        self.current_values[node_metric_id] = entry
-        
-        # Persist to InfluxDB
-        if persist_value is not None:
-             # Add interface name to metric name if applicable for clarity? 
-             # Or keep generic metric name and use tag? Tag is better.
-             # e.g. metric="Traffic In", interface="eth0"
+        try:
+             # Delegate to processor
+             result = await self.metric_processor.process_metric(node, node_metric, value)
              
-             await storage.write_snmp_metric(
-                 node_name=node.name,
-                 ip=node.ip,
-                 group_name=node.group.name if node.group else "global",
-                 metric_name=metric_def.name,
-                 value=persist_value,
-                 unit=unit if metric_type != 'counter' or unit != 'bytes' else 'bps', # Change unit to bps if rate
-                 interface=node_metric.interface_name,
-                 metric_type=metric_type
-             )
+             if result:
+                 # Update local cache for API
+                 self.current_values[node_metric.id] = result
+                 
+        except Exception as e:
+            logger.error(f"Error storing metric {node_metric.id}: {e}")
         
     def get_current_values(self, node_id: str = None) -> Dict:
         """Get current values, optionally filtered by node"""

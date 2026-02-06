@@ -20,7 +20,7 @@ def save_config(db: Session):
             try:
                 with open(CONFIG_PATH, "r") as f:
                     existing_data = json.load(f)
-            except:
+            except Exception:
                 pass # corrupted or empty, start fresh-ish
         
         # Fetch all groups with their nodes
@@ -96,7 +96,7 @@ def save_app_config(app_config: dict):
                 try:
                     t = int(p_config["alert_threshold"])
                     if t < 1: raise ValueError
-                except:
+                except (ValueError, TypeError):
                     logger.warning("Invalid alert_threshold, defaulting to 5")
                     p_config["alert_threshold"] = 5
             
@@ -104,7 +104,7 @@ def save_app_config(app_config: dict):
                 try:
                     w = int(p_config["alert_window"])
                     if w < 1: raise ValueError
-                except:
+                except (ValueError, TypeError):
                     logger.warning("Invalid alert_window, defaulting to 60")
                     p_config["alert_window"] = 60
 

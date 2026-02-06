@@ -367,7 +367,7 @@ const Config = () => {
                         <button
                             onClick={() => setActiveTab('metrics')}
                             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'metrics' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-                        >SNMP</button>
+                        >Metrics</button>
                         <button
                             onClick={() => setActiveTab('groups')}
                             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${activeTab === 'groups' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}

@@ -7,7 +7,7 @@ const Layout = ({ children }) => {
 
     const navItems = [
         { name: 'Dashboard', path: '/', icon: Activity },
-        { name: 'SNMP Metrics', path: '/metrics', icon: Server },
+        { name: 'Metrics', path: '/metrics', icon: Server },
         { name: 'Discovery', path: '/discovery', icon: Network },
         { name: 'Configuration', path: '/config', icon: Settings },
     ];

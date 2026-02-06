@@ -16,12 +16,8 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
     const [saving, setSaving] = useState(false);
     const [expandedInterfaces, setExpandedInterfaces] = useState(new Set());
 
-    const snmpNodes = nodes.filter(n => {
-        if (n.monitor_snmp === true) return true;
-        if (n.monitor_snmp === false) return false;
-        const group = groups.find(g => g.id === n.group_id);
-        return group ? group.monitor_snmp : false;
-    });
+    // We allow configuration for any node now (generic metrics)
+    const snmpNodes = nodes;
 
     useEffect(() => {
         const loadDefinitions = async () => {
@@ -94,10 +90,41 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
         );
     };
 
+    const handleUpdateMetric = async (defId, ifaceIndex = null, ifaceName = null, updates = {}) => {
+        if (!selectedNodeId) return;
+
+        let newConfig = [...localConfig];
+        const existingIdx = newConfig.findIndex(m =>
+            m.metric_definition_id === defId &&
+            m.interface_index === ifaceIndex
+        );
+
+        if (existingIdx >= 0) {
+            // Update existing
+            newConfig[existingIdx] = { ...newConfig[existingIdx], ...updates };
+        } else {
+            // Create new (if toggling on with params)
+            newConfig.push({
+                node_id: selectedNodeId,
+                metric_definition_id: defId,
+                interface_index: ifaceIndex,
+                interface_name: ifaceName,
+                collection_interval: 60,
+                enabled: true,
+                alert_enabled: true, // Legacy field, kept for schema but not used
+                alert_condition: 'gt', // Default: Above
+                warning_threshold: null,
+                critical_threshold: null,
+                ...updates
+            });
+        }
+
+        saveConfig(newConfig);
+    };
+
     const handleToggleMetric = async (defId, ifaceIndex = null, ifaceName = null) => {
         if (!selectedNodeId) return;
 
-        // Clone current config
         let newConfig = [...localConfig];
         const existingIdx = newConfig.findIndex(m =>
             m.metric_definition_id === defId &&
@@ -115,48 +142,81 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                 interface_index: ifaceIndex,
                 interface_name: ifaceName,
                 collection_interval: 60,
-                enabled: true
+                enabled: true,
+                alert_enabled: true,
+                alert_condition: 'gt',
+                warning_threshold: null,
+                critical_threshold: null
             });
         }
+        saveConfig(newConfig);
+    };
 
-        // Optimistic Update
+    const saveConfig = async (newConfig) => {
         setLocalConfig(newConfig);
-
-        // Save
         setSaving(true);
         try {
-            // Filter out internal fields before sending 'Create' payloads if needed?
-            // The API expects NodeMetricCreate schemas.
-            // Our local config has DB fields (id, created_at) which API ignores or handles.
-            // We should map to clean objects.
             const payload = newConfig.map(c => ({
                 node_id: selectedNodeId,
                 metric_definition_id: c.metric_definition_id,
                 interface_index: c.interface_index,
                 interface_name: c.interface_name,
                 collection_interval: c.collection_interval || 60,
-                enabled: true
+                enabled: true,
+                alert_enabled: true, // Always true or ignored by backend logic now
+                alert_condition: c.alert_condition || 'gt',
+                warning_threshold: c.warning_threshold,
+                critical_threshold: c.critical_threshold
             }));
 
             await api.post(`/metrics/nodes/${selectedNodeId}`, payload);
-            // Don't toast on every click, too noisy. Maybe a small indicator?
         } catch (e) {
             console.error(e);
             toast.error("Failed to save configuration");
-            // Revert on error? For now rely on reload or retry.
         } finally {
             setSaving(false);
         }
     };
 
-    // Derived Lists
+    // Helper to determine effective protocol settings
+    const getEffectiveProtocols = (nodeId) => {
+        if (!nodeId) return { snmp: false, ping: false };
+        const node = nodes.find(n => n.id === nodeId);
+        if (!node) return { snmp: false, ping: false };
+
+        const group = groups.find(g => g.id === node.group_id);
+
+        const snmp = node.monitor_snmp !== null ? node.monitor_snmp : (group?.monitor_snmp ?? false);
+        const ping = node.monitor_ping !== null ? node.monitor_ping : (group?.monitor_ping ?? true);
+
+        return { snmp, ping };
+    };
+
+    // Derived Lists with Filtering
+    const protocols = getEffectiveProtocols(selectedNodeId);
+
+    // Interface metrics are SNMP only
+    const showInterfaces = protocols.snmp;
+
     const interfaceDefs = definitions.filter(d => d.category === 'interface');
-    const systemDefs = definitions.filter(d => d.category !== 'interface');
+
+    // Filter System metrics based on enabled protocols
+    const systemDefs = definitions.filter(d => {
+        if (d.category === 'interface') return false;
+
+        // Check source
+        const source = d.metric_source || 'snmp'; // Default to snmp if null
+
+        if (source === 'snmp' && !protocols.snmp) return false;
+        if (source === 'icmp' && !protocols.ping) return false;
+
+        return true;
+    });
 
     return (
         <div className="bg-surface p-6 rounded-xl border border-slate-700 shadow-sm space-y-6">
             <h3 className="text-xl font-semibold text-slate-100 flex items-center justify-between">
-                <span>SNMP Metrics Configuration</span>
+                <span>Metrics Configuration</span>
                 {saving && <span className="text-xs text-blue-400 flex items-center"><Loader2 size={12} className="animate-spin mr-1" /> Saving...</span>}
             </h3>
 
@@ -179,126 +239,178 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in">
 
                     {/* INTERFACES COLUMN */}
-                    <div className="lg:col-span-2 space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h4 className="text-lg font-medium text-slate-200 flex items-center gap-2">
-                                <Network size={20} className="text-blue-400" /> Interfaces
-                            </h4>
-                            <button
-                                onClick={handleScanInterfaces}
-                                disabled={scanning}
-                                className="text-primary hover:text-blue-300 text-sm flex items-center bg-blue-500/10 px-3 py-1.5 rounded-md transition-colors"
-                            >
-                                {scanning ? <Loader2 size={16} className="animate-spin mr-2" /> : <RefreshCw size={16} className="mr-2" />}
-                                {scanning ? "Scanning..." : "Scan Interfaces"}
-                            </button>
-                        </div>
+                    {showInterfaces && (
+                        <div className="lg:col-span-2 space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h4 className="text-lg font-medium text-slate-200 flex items-center gap-2">
+                                    <Network size={20} className="text-blue-400" /> SNMP Interface
+                                </h4>
+                                <button
+                                    onClick={handleScanInterfaces}
+                                    disabled={scanning}
+                                    className="text-primary hover:text-blue-300 text-sm flex items-center bg-blue-500/10 px-3 py-1.5 rounded-md transition-colors"
+                                >
+                                    {scanning ? <Loader2 size={16} className="animate-spin mr-2" /> : <RefreshCw size={16} className="mr-2" />}
+                                    {scanning ? "Scanning..." : "Scan Interfaces"}
+                                </button>
+                            </div>
 
-                        <div className="bg-slate-900/50 rounded-lg border border-slate-700/50 overflow-hidden">
-                            {loadingInterfaces ? (
-                                <div className="p-8 text-center text-slate-500">Loading...</div>
-                            ) : interfaces.length > 0 ? (
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-slate-800/50 text-slate-400 border-b border-slate-700/50">
-                                        <tr>
-                                            <th className="px-4 py-3 w-10"></th>
-                                            <th className="px-4 py-3">Index</th>
-                                            <th className="px-4 py-3">Name</th>
-                                            <th className="px-4 py-3">Status</th>
-                                            <th className="px-4 py-3">Active Metrics</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-700/50">
-                                        {interfaces.map(iface => {
-                                            const isExpanded = expandedInterfaces.has(iface.index);
-                                            // Count active metrics for summary (only interface category)
-                                            const activeCount = localConfig.filter(m => {
-                                                if (m.interface_index !== iface.index) return false;
-                                                const def = definitions.find(d => d.id === m.metric_definition_id);
-                                                return def && def.category === 'interface';
-                                            }).length;
+                            <div className="bg-slate-900/50 rounded-lg border border-slate-700/50 overflow-hidden">
+                                {loadingInterfaces ? (
+                                    <div className="p-8 text-center text-slate-500">Loading...</div>
+                                ) : interfaces.length > 0 ? (
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-slate-800/50 text-slate-400 border-b border-slate-700/50">
+                                            <tr>
+                                                <th className="px-4 py-3 w-10"></th>
+                                                <th className="px-4 py-3">Index</th>
+                                                <th className="px-4 py-3">Name</th>
+                                                <th className="px-4 py-3">Status</th>
+                                                <th className="px-4 py-3">Active Metrics</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-700/50">
+                                            {interfaces.map(iface => {
+                                                const isExpanded = expandedInterfaces.has(iface.index);
+                                                // Count active metrics for summary (only interface category)
+                                                const activeCount = localConfig.filter(m => {
+                                                    if (m.interface_index !== iface.index) return false;
+                                                    const def = definitions.find(d => d.id === m.metric_definition_id);
+                                                    return def && def.category === 'interface';
+                                                }).length;
 
-                                            // Auto-expand if active metrics exist (optional UX choice, keeping manual for now or auto on load?)
-                                            // Let's keep manual expansion, but highlight row if active.
-
-                                            return (
-                                                <React.Fragment key={iface.index}>
-                                                    <tr
-                                                        className={`hover:bg-slate-800/30 transition-colors cursor-pointer ${activeCount > 0 ? 'bg-blue-900/10' : ''}`}
-                                                        onClick={() => toggleExpand(iface.index)}
-                                                    >
-                                                        <td className="px-4 py-3 text-slate-500">
-                                                            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                                        </td>
-                                                        <td className="px-4 py-3 font-mono text-slate-500">{iface.index}</td>
-                                                        <td className="px-4 py-3 font-medium text-slate-200">
-                                                            {iface.name} <span className="text-slate-500 font-normal ml-2">{iface.alias}</span>
-                                                        </td>
-                                                        <td className="px-4 py-3">
-                                                            {/* Status Badges */}
-                                                            {String(iface.admin_status) === '1' || String(iface.admin_status) === 'up' ?
-                                                                <span className="text-xs text-green-400">UP</span> :
-                                                                <span className="text-xs text-red-500">DOWN</span>
-                                                            }
-                                                        </td>
-                                                        <td className="px-4 py-3">
-                                                            {activeCount > 0 ? (
-                                                                <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">{activeCount}</span>
-                                                            ) : (
-                                                                <span className="text-slate-600">-</span>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-
-                                                    {isExpanded && (
-                                                        <tr className="bg-slate-900/80">
-                                                            <td colSpan={5} className="px-4 py-4 border-l-2 border-blue-500/50">
-                                                                <div className="pl-4">
-                                                                    <h5 className="text-xs uppercase text-slate-500 font-bold mb-3 tracking-wider">Available Metrics</h5>
-                                                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                                                        {interfaceDefs.map(def => {
-                                                                            const isChecked = isMetricEnabled(def.id, iface.index);
-                                                                            return (
-                                                                                <label key={def.id} className="flex items-center space-x-2 cursor-pointer group">
-                                                                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isChecked ? 'bg-blue-500 border-blue-500' : 'border-slate-600 group-hover:border-slate-500'}`}>
-                                                                                        {isChecked && <Check size={10} className="text-white" />}
-                                                                                    </div>
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        className="hidden"
-                                                                                        checked={isChecked}
-                                                                                        onChange={() => handleToggleMetric(def.id, iface.index, iface.name)}
-                                                                                    />
-                                                                                    <span className={`text-sm ${isChecked ? 'text-white' : 'text-slate-400 group-hover:text-slate-300'}`}>
-                                                                                        {def.name.replace('Interface ', '')
-                                                                                            .replace('Bytes In', 'Traffic In (Legacy)')
-                                                                                            .replace('Bytes Out', 'Traffic Out (Legacy)')}
-                                                                                    </span>
-                                                                                </label>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                </div>
+                                                return (
+                                                    <React.Fragment key={iface.index}>
+                                                        <tr
+                                                            className={`hover:bg-slate-800/30 transition-colors cursor-pointer ${activeCount > 0 ? 'bg-blue-900/10' : ''}`}
+                                                            onClick={() => toggleExpand(iface.index)}
+                                                        >
+                                                            <td className="px-4 py-3 text-slate-500">
+                                                                {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                                            </td>
+                                                            <td className="px-4 py-3 font-mono text-slate-500">{iface.index}</td>
+                                                            <td className="px-4 py-3 font-medium text-slate-200">
+                                                                {iface.name} <span className="text-slate-500 font-normal ml-2">{iface.alias}</span>
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                {/* Status Badges */}
+                                                                {String(iface.admin_status) === '1' || String(iface.admin_status) === 'up' ?
+                                                                    <span className="text-xs text-green-400">UP</span> :
+                                                                    <span className="text-xs text-red-500">DOWN</span>
+                                                                }
+                                                            </td>
+                                                            <td className="px-4 py-3">
+                                                                {activeCount > 0 ? (
+                                                                    <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">{activeCount}</span>
+                                                                ) : (
+                                                                    <span className="text-slate-600">-</span>
+                                                                )}
                                                             </td>
                                                         </tr>
-                                                    )}
-                                                </React.Fragment>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            ) : (
-                                <div className="text-center py-12 text-slate-500">No interfaces found. Scan to discover.</div>
-                            )}
+
+                                                        {isExpanded && (
+                                                            <tr className="bg-slate-900/80">
+                                                                <td colSpan={5} className="px-4 py-4 border-l-2 border-blue-500/50">
+                                                                    <div className="pl-4">
+                                                                        <h5 className="text-xs uppercase text-slate-500 font-bold mb-3 tracking-wider">Available Metrics</h5>
+                                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                            {interfaceDefs.map(def => {
+                                                                                const isChecked = isMetricEnabled(def.id, iface.index);
+                                                                                const config = localConfig.find(m => m.metric_definition_id === def.id && m.interface_index === iface.index);
+
+                                                                                return (
+                                                                                    <div key={def.id} className={`relative p-2 rounded border transition-colors ${isChecked ? 'bg-slate-800/80 border-slate-600' : 'border-transparent hover:bg-slate-800/30'}`}>
+                                                                                        <div className="absolute top-2 right-2 text-[10px] uppercase text-slate-500 font-mono font-bold tracking-wider">
+                                                                                            {def.unit}
+                                                                                        </div>
+                                                                                        <label className="flex items-center space-x-2 cursor-pointer group mb-1">
+                                                                                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${isChecked ? 'bg-blue-500 border-blue-500' : 'border-slate-600 group-hover:border-slate-500'}`}>
+                                                                                                {isChecked && <Check size={10} className="text-white" />}
+                                                                                            </div>
+                                                                                            <input
+                                                                                                type="checkbox"
+                                                                                                className="hidden"
+                                                                                                checked={isChecked}
+                                                                                                onChange={() => handleToggleMetric(def.id, iface.index, iface.name)}
+                                                                                            />
+                                                                                            <span className={`text-sm ${isChecked ? 'text-white' : 'text-slate-400 group-hover:text-slate-300'}`}>
+                                                                                                {def.name.replace('Interface ', '')
+                                                                                                    .replace('Bytes In', 'Traffic In (Legacy)')
+                                                                                                    .replace('Bytes Out', 'Traffic Out (Legacy)')}
+                                                                                            </span>
+                                                                                        </label>
+
+                                                                                        {isChecked && (
+                                                                                            <div className="flex flex-wrap items-end gap-3">
+                                                                                                {/* Condition Buttons */}
+                                                                                                <div className="flex items-center gap-1">
+                                                                                                    <button
+                                                                                                        onClick={() => handleUpdateMetric(def.id, iface.index, iface.name, { alert_condition: 'lt' })}
+                                                                                                        className={`w-8 h-[26px] flex items-center justify-center text-xs rounded border transition-colors ${config?.alert_condition === 'lt' ? 'bg-slate-700 border-slate-500 text-white font-bold shadow-sm' : 'bg-slate-900 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'}`}
+                                                                                                        title="Alert when value is Below (<)"
+                                                                                                    >
+                                                                                                        &lt;
+                                                                                                    </button>
+                                                                                                    <button
+                                                                                                        onClick={() => handleUpdateMetric(def.id, iface.index, iface.name, { alert_condition: 'gt' })}
+                                                                                                        className={`w-8 h-[26px] flex items-center justify-center text-xs rounded border transition-colors ${(!config?.alert_condition || config.alert_condition === 'gt') ? 'bg-slate-700 border-slate-500 text-white font-bold shadow-sm' : 'bg-slate-900 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'}`}
+                                                                                                        title="Alert when value is Above (>)"
+                                                                                                    >
+                                                                                                        &gt;
+                                                                                                    </button>
+                                                                                                </div>
+
+                                                                                                {/* Inputs */}
+                                                                                                <div className="flex items-center gap-2">
+                                                                                                    <div>
+                                                                                                        <label className="text-[10px] text-slate-500 block font-medium">Warn</label>
+                                                                                                        <input
+                                                                                                            type="number"
+                                                                                                            value={config?.warning_threshold || ''}
+                                                                                                            onChange={(e) => handleUpdateMetric(def.id, iface.index, iface.name, { warning_threshold: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                                                                                                            className="w-20 h-[26px] bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white focus:border-blue-500 outline-none"
+                                                                                                            placeholder="None"
+                                                                                                        />
+                                                                                                    </div>
+                                                                                                    <div>
+                                                                                                        <label className="text-[10px] text-slate-500 block font-medium">Crit</label>
+                                                                                                        <input
+                                                                                                            type="number"
+                                                                                                            value={config?.critical_threshold || ''}
+                                                                                                            onChange={(e) => handleUpdateMetric(def.id, iface.index, iface.name, { critical_threshold: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                                                                                                            className="w-20 h-[26px] bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white focus:border-red-500 outline-none"
+                                                                                                            placeholder="None"
+                                                                                                        />
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </React.Fragment>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                ) : (
+                                    <div className="text-center py-12 text-slate-500">No interfaces found. Scan to discover.</div>
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* SYSTEM METRICS COLUMN */}
                     <div>
                         <h4 className="text-lg font-medium text-slate-200 mb-3 flex items-center gap-2">
                             <Activity size={20} className="text-purple-400" /> System Metrics
                         </h4>
-                        <div className="bg-slate-900/30 rounded-lg p-1 border border-slate-700/30 space-y-0.5">
+                        <div className="bg-slate-900/30 rounded-lg p-1 border border-slate-700/30 space-y-2">
                             {systemDefs.map(def => {
                                 // Find specific config entry
                                 const configEntry = localConfig.find(m => m.metric_definition_id === def.id);
@@ -306,51 +418,99 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                                 const currentIndex = configEntry ? (configEntry.interface_index ?? 1) : 1;
 
                                 return (
-                                    <div key={def.id} className="flex items-center justify-between p-3 hover:bg-slate-800/50 rounded-md transition-colors group">
-                                        <label className="flex items-center cursor-pointer flex-1">
-                                            <div className={`w-4 h-4 rounded border flex items-center justify-center mr-3 transition-colors ${isChecked ? 'bg-purple-500 border-purple-500' : 'border-slate-600'}`}>
-                                                {isChecked && <Check size={10} className="text-white" />}
-                                            </div>
-                                            <input
-                                                type="checkbox"
-                                                className="hidden"
-                                                checked={isChecked}
-                                                // If toggling on, check if index is required. 
-                                                // If toggling off, pass the current index to ensure removal match.
-                                                onChange={() => {
-                                                    if (isChecked) {
-                                                        // Toggle Off: remove by passing current index (could be null or a number)
-                                                        handleToggleMetric(def.id, configEntry.interface_index);
-                                                    } else {
-                                                        // Toggle On: default to 1 if index required, else null
-                                                        const idx = def.requires_index ? 1 : null;
-                                                        handleToggleMetric(def.id, idx);
-                                                    }
-                                                }}
-                                            />
-                                            <div>
-                                                <div className={`text-sm font-medium ${isChecked ? 'text-white' : 'text-slate-300'}`}>{def.name}</div>
-                                                <div className="text-xs text-slate-500">{def.oid_template}</div>
-                                            </div>
-                                        </label>
-
-                                        {def.requires_index && isChecked && (
-                                            <div className="ml-4 flex items-center space-x-2">
-                                                <span className="text-xs text-slate-500">Idx:</span>
+                                    <div key={def.id} className="relative bg-slate-800/30 rounded-md p-3 border border-slate-700/30">
+                                        <div className="absolute top-2 right-2 text-[10px] uppercase text-slate-500 font-mono font-bold tracking-wider">
+                                            {def.unit}
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                            <label className="flex items-center cursor-pointer flex-1">
+                                                <div className={`w-4 h-4 rounded border flex items-center justify-center mr-3 transition-colors ${isChecked ? 'bg-purple-500 border-purple-500' : 'border-slate-600'}`}>
+                                                    {isChecked && <Check size={10} className="text-white" />}
+                                                </div>
                                                 <input
-                                                    type="number"
-                                                    className="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:border-purple-500 outline-none"
-                                                    value={currentIndex}
-                                                    onChange={(e) => {
-                                                        const val = parseInt(e.target.value);
-                                                        // Update existing entry with new index
-                                                        const newConfig = localConfig.map(c =>
-                                                            c.metric_definition_id === def.id ? { ...c, interface_index: val } : c
-                                                        );
-                                                        setLocalConfig(newConfig);
+                                                    type="checkbox"
+                                                    className="hidden"
+                                                    checked={isChecked}
+                                                    onChange={() => {
+                                                        if (isChecked) {
+                                                            handleToggleMetric(def.id, configEntry.interface_index);
+                                                        } else {
+                                                            // Toggle On
+                                                            const idx = def.requires_index ? 1 : null;
+                                                            handleToggleMetric(def.id, idx);
+                                                        }
                                                     }}
-                                                    onClick={(e) => e.stopPropagation()}
                                                 />
+                                                <div>
+                                                    <div className={`text-sm font-medium ${isChecked ? 'text-white' : 'text-slate-300'}`}>{def.name}</div>
+                                                    <div className="text-xs text-slate-500">{def.oid_template}</div>
+                                                </div>
+                                            </label>
+
+                                            {def.requires_index && isChecked && (
+                                                <div className="mr-8 flex items-center space-x-2">
+                                                    <span className="text-xs text-slate-500">Idx:</span>
+                                                    <input
+                                                        type="number"
+                                                        className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:border-purple-500 outline-none"
+                                                        value={currentIndex}
+                                                        onChange={(e) => {
+                                                            const val = parseInt(e.target.value);
+                                                            handleUpdateMetric(def.id, configEntry.interface_index, null, { interface_index: val });
+                                                        }}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        placeholder="#"
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Alert Configuration for System Metrics */}
+                                        {isChecked && (
+                                            <div className="mt-3 pl-7 border-l-2 border-slate-700/50">
+                                                <div className="flex flex-wrap items-end gap-3">
+
+                                                    {/* Condition Buttons */}
+                                                    <div className="flex items-center gap-1">
+                                                        <button
+                                                            onClick={() => handleUpdateMetric(def.id, configEntry.interface_index, null, { alert_condition: 'lt' })}
+                                                            className={`w-8 h-[26px] flex items-center justify-center text-xs rounded border transition-colors ${configEntry.alert_condition === 'lt' ? 'bg-slate-700 border-slate-500 text-white font-bold shadow-sm' : 'bg-slate-900 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'}`}
+                                                            title="Alert when value is Below (<)"
+                                                        >
+                                                            &lt;
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleUpdateMetric(def.id, configEntry.interface_index, null, { alert_condition: 'gt' })}
+                                                            className={`w-8 h-[26px] flex items-center justify-center text-xs rounded border transition-colors ${(!configEntry.alert_condition || configEntry.alert_condition === 'gt') ? 'bg-slate-700 border-slate-500 text-white font-bold shadow-sm' : 'bg-slate-900 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'}`}
+                                                            title="Alert when value is Above (>)"
+                                                        >
+                                                            &gt;
+                                                        </button>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="flex flex-col gap-1">
+                                                            <span className="text-[10px] text-slate-500 font-medium">Warning</span>
+                                                            <input
+                                                                type="number"
+                                                                value={configEntry.warning_threshold || ''}
+                                                                onChange={(e) => handleUpdateMetric(def.id, configEntry.interface_index, null, { warning_threshold: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                                                                className="w-20 h-[26px] bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:border-purple-500 outline-none"
+                                                                placeholder="None"
+                                                            />
+                                                        </div>
+                                                        <div className="flex flex-col gap-1">
+                                                            <span className="text-[10px] text-slate-500 font-medium">Critical</span>
+                                                            <input
+                                                                type="number"
+                                                                value={configEntry.critical_threshold || ''}
+                                                                onChange={(e) => handleUpdateMetric(def.id, configEntry.interface_index, null, { critical_threshold: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                                                                className="w-20 h-[26px] bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:border-red-500 outline-none"
+                                                                placeholder="None"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -358,6 +518,7 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                             })}
                         </div>
                     </div>
+                    {/* End System Metrics */}
 
                 </div>
             )}

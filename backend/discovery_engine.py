@@ -167,7 +167,7 @@ class DiscoveryEngine:
         # Try DNS/NetBIOS resolution first (basic)
         try:
             result["hostname"] = await self._resolve_hostname(ip)
-        except:
+        except Exception:
             pass
 
         # Try SNMP
@@ -211,7 +211,7 @@ class DiscoveryEngine:
             loop = asyncio.get_running_loop()
             name, _, _ = await loop.run_in_executor(None, lambda: socket.gethostbyaddr(ip))
             return name
-        except:
+        except Exception:
             return None
 
     def _identify_device(self, descr: str, oid: str) -> Tuple[str, str]:

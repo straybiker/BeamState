@@ -1,7 +1,7 @@
 import uuid
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 import re
@@ -68,6 +68,7 @@ class MetricDefinitionDB(Base):
     unit = Column(String, nullable=True)  # "bytes", "percent", "celsius"
     category = Column(String, nullable=True)  # "interface", "system", "poe"
     device_type = Column(String, nullable=True)  # "unifi_switch", "unifi_ap", "generic"
+    metric_source = Column(String, default="snmp") # "snmp", "icmp", "agent"
     requires_index = Column(Boolean, default=False)  # True if OID needs interface index
     enabled = Column(Boolean, default=True)
     
@@ -81,6 +82,13 @@ class NodeMetricDB(Base):
     interface_index = Column(Integer, nullable=True)  # For per-interface metrics
     interface_name = Column(String, nullable=True)  # e.g., "eth0", "port1"
     collection_interval = Column(Integer, default=60)  # Seconds
+    
+    # Alerting
+    warning_threshold = Column(Float, nullable=True)
+    critical_threshold = Column(Float, nullable=True)
+    alert_enabled = Column(Boolean, default=False)
+    alert_condition = Column(String, default="gt") # 'gt' or 'lt'
+    
     enabled = Column(Boolean, default=True)
     
     node = relationship("NodeDB", back_populates="node_metrics")
@@ -167,6 +175,7 @@ class MetricDefinitionBase(BaseModel):
     unit: Optional[str] = None
     category: Optional[str] = None
     device_type: Optional[str] = None
+    metric_source: Optional[str] = "snmp"
     requires_index: bool = False
     enabled: bool = True
 
@@ -184,6 +193,10 @@ class NodeMetricBase(BaseModel):
     interface_index: Optional[int] = None
     interface_name: Optional[str] = None
     collection_interval: int = 60
+    warning_threshold: Optional[float] = None
+    critical_threshold: Optional[float] = None
+    alert_enabled: bool = False
+    alert_condition: str = "gt" # 'gt' or 'lt'
     enabled: bool = True
 
 class NodeMetricCreate(NodeMetricBase):

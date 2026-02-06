@@ -52,27 +52,14 @@ async def lifespan(app: FastAPI):
     init_db()
     
     # Run database migrations for new columns
+    # Run database migrations
     try:
-        import sqlite3
-        db_path = os.path.join(os.path.dirname(__file__), 'data', 'beamstate.db')
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        # Check if notification_priority column exists, add if not
-        cursor.execute("PRAGMA table_info(nodes)")
-        columns = [col[1] for col in cursor.fetchall()]
-        if 'notification_priority' not in columns:
-            cursor.execute('ALTER TABLE nodes ADD COLUMN notification_priority INTEGER')
-            logger.info("Migration: Added notification_priority column to nodes table")
-        # Check if is_default column exists in groups, add if not
-        cursor.execute("PRAGMA table_info(groups)")
-        group_columns = [col[1] for col in cursor.fetchall()]
-        if 'is_default' not in group_columns:
-            cursor.execute('ALTER TABLE groups ADD COLUMN is_default BOOLEAN DEFAULT 0')
-            logger.info("Migration: Added is_default column to groups table")
-        conn.commit()
-        conn.close()
+        from migrations.schema_update import run_migrations
+        run_migrations()
+        from migrations.schema_update_v2 import run_migrations as run_migrations_v2
+        run_migrations_v2()
     except Exception as e:
-        logger.warning(f"Database migration check failed (may be first run): {e}")
+        logger.warning(f"Database migration failed: {e}")
     
     # Run Startup Cleanup & Sync
     try:
@@ -132,3 +119,8 @@ def read_root():
 @app.get("/status")
 def get_pinger_status():
     return pinger.get_status()
+
+if __name__ == "__main__":
+    import uvicorn
+    # Allow direct running with python main.py
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

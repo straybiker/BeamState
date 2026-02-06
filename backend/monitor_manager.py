@@ -1,13 +1,15 @@
 import asyncio
 import logging
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 from database import SessionLocal
 from models import NodeDB, GroupDB
 from storage import storage
 from monitors import PingMonitor, SNMPMonitor, MonitorResult
 from monitors.snmp_data_collector import SNMPDataCollector
 from notifications import PushoverClient
+from metrics_processor import MetricProcessor
+from models import MetricDefinitionDB, NodeMetricDB
 
 logger = logging.getLogger("BeamState.MonitorManager")
 
@@ -25,12 +27,23 @@ class MonitorManager:
         self.ping_monitor = PingMonitor()
         self.snmp_monitor = SNMPMonitor()
         self.snmp_collector = SNMPDataCollector()
-        self.snmp_collector = SNMPDataCollector()
-        self.pushover = PushoverClient()
+        
+        # Configure Pushover
+        pushover_conf = storage.config.get("pushover", {})
+        self.pushover = PushoverClient(
+            token=pushover_conf.get("token"),
+            user_key=pushover_conf.get("user_key")
+        )
+        self.metric_processor = MetricProcessor(self.pushover)
+        
+        # Inject processor into collector
+        self.snmp_collector.set_processor(self.metric_processor)
         
         # Throttling state
         self.alert_history: List[float] = [] # timestamps of recent alerts
         self.last_storm_alert_time = 0
+
+
 
 
     def remove_node(self, node_id: int):
@@ -191,11 +204,20 @@ class MonitorManager:
         new_status = current_status
         
         if overall_success:
-            # Success
-            if current_status in ["PENDING", "DOWN"]:
-                logger.info(f"Node {node.name} recovered. Marking UP.")
+            # Success (Ping/SNMP reachability OK)
             new_status = "UP"
-            state["failure_count"] = 0
+            
+            # Check if metric alerts override status
+            metric_status = self.metric_processor.get_node_alert_status(node)
+            if metric_status == "DOWN":
+                new_status = "DOWN"
+            elif metric_status == "PENDING":
+                 new_status = "PENDING"
+            
+            if current_status != new_status:
+                logger.info(f"Node {node.name} status changed: {current_status} -> {new_status} (Reachability: OK, Metric Alert: {metric_status})")
+                
+            state["failure_count"] = 0 # Reset failure count for reachability
             state["first_failure_time"] = 0
         else:
             # Failure
@@ -260,10 +282,42 @@ class MonitorManager:
                 success=result.success,
                 raw_data=result.raw_data
             )
+            
+            # --- NEW: Process generic generic metrics for alerting (ICMP) ---
+            if result.protocol == "icmp" and result.success:
+                # We need to find the NodeMetricDB entries for this node's ICMP metrics
+                # Since we are in an async method and db session is closed (it was passed in process_node? No, process_node uses DB via run_loop passing it?
+                # Wait, process_node takes 'node' which is attached to a session?
+                # 'node' comes from run_loop -> db.query(). So it is attached.
+                # But be careful about lazy loading if session is closed? 
+                # run_loop keeps session open while awaiting tasks.
+                
+                # We can access node.node_metrics
+                for nm in node.node_metrics:
+                    if not nm.enabled: continue
+                    definition = nm.metric_definition
+                    if not definition: continue
+                    if definition.metric_source != "icmp": continue
+                    
+                    val = None
+                    if definition.name == "ICMP Latency" and result.latency_ms is not None:
+                         val = result.latency_ms
+                    elif definition.name == "ICMP Packet Loss":
+                         val = result.raw_data.get("packet_loss", 0.0)
+                         
+                    if val is not None:
+                         try:
+                             result = await self.metric_processor.process_metric(node, nm, val)
+                             # Store in shared cache for UI access
+                             if result:
+                                 self.snmp_collector.current_values[nm.id] = result
+                         except Exception as ex:
+                             logger.error(f"Error processing ICMP metric {definition.name}: {ex}")
 
     async def run_loop(self):
         self.running = True
         logger.info("Monitor Loop Started")
+        
         
         # Start SNMP Collector
         await self.snmp_collector.start()
@@ -307,13 +361,6 @@ class MonitorManager:
             # Check maintenance mode
             m_mode = pushover_config.get("maintenance_mode", False)
             
-            # Write debug trace
-            try:
-                with open("debug_trace.txt", "a") as f:
-                    f.write(f"Alert Check: maintenance_mode={m_mode}, keys={list(pushover_config.keys())}\n")
-            except:
-                pass
-
             if m_mode:
                 logger.warning(f"Maintenance Mode Active: Suppressing alert for {node.name}")
                 return

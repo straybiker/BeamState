@@ -30,7 +30,7 @@ def seed_metric_definitions():
         count = 0
         metrics_data = load_metrics_from_file()
         
-        # Add default metrics if they don't exist
+        # Add default metrics if they don't exist, or update if changed
         for metric_data in metrics_data:
             existing = db.query(MetricDefinitionDB).filter(
                 MetricDefinitionDB.name == metric_data["name"]
@@ -41,6 +41,51 @@ def seed_metric_definitions():
                 db.add(metric)
                 count += 1
                 logger.info(f"Adding new metric definition: {metric_data['name']}")
+            else:
+                # Update fields if changed
+                changed = False
+                if existing.unit != metric_data["unit"]:
+                    existing.unit = metric_data["unit"]
+                    changed = True
+                if existing.oid_template != metric_data["oid_template"]:
+                    existing.oid_template = metric_data["oid_template"]
+                    changed = True
+                
+                if changed:
+                    count += 1 # Count updates too
+                    logger.info(f"Updated metric definition: {metric_data['name']}")
+        
+        # Add internal ICMP metrics
+        icmp_metrics = [
+            {
+                "name": "ICMP Latency",
+                "oid_template": "internal.icmp.latency", # Placeholder, not used for SNMP
+                "metric_type": "gauge",
+                "unit": "ms",
+                "category": "system",
+                "device_type": "generic",
+                "metric_source": "icmp",
+                "requires_index": False
+            },
+            {
+                "name": "ICMP Packet Loss",
+                "oid_template": "internal.icmp.loss",
+                "metric_type": "gauge",
+                "unit": "percent",
+                "category": "system",
+                "device_type": "generic",
+                "metric_source": "icmp",
+                "requires_index": False
+            }
+        ]
+        
+        for m_data in icmp_metrics:
+            existing = db.query(MetricDefinitionDB).filter(MetricDefinitionDB.name == m_data["name"]).first()
+            if not existing:
+                metric = MetricDefinitionDB(**m_data)
+                db.add(metric)
+                count += 1
+                logger.info(f"Adding new ICMP metric: {m_data['name']}")
         
         if count > 0:
             db.commit()

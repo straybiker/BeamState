@@ -96,7 +96,7 @@ def _sync_discover_interfaces(ip: str, port: int, community: str) -> list:
                     if idx not in interfaces:
                         interfaces[idx] = {"index": idx}
                     interfaces[idx][key_name] = val.prettyPrint()
-                except:
+                except Exception:
                     pass
 
     # 1. Fetch ifDescr (Base)
