@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Save, RefreshCw, Database, FileText, Bell } from 'lucide-react';
+import { Save, RefreshCw, Database, FileText, Bell, Info, Github } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '../api';
 
@@ -385,6 +385,49 @@ const AppConfig = () => {
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            {/* About / Version */}
+            <div className="bg-surface rounded-xl p-6 border border-slate-700/50">
+                <div className="flex items-center space-x-3 mb-4">
+                    <div className="p-2 bg-slate-500/20 text-slate-400 rounded-lg">
+                        <Info size={24} />
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-semibold text-white">About</h3>
+                        <p className="text-xs text-slate-400">BeamState version information</p>
+                    </div>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-2">
+                            <span className="text-sm text-slate-400">Version</span>
+                            <a 
+                                href={`https://github.com/straybiker/BeamState/releases/tag/v${__APP_VERSION__}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-semibold bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 transition-colors"
+                            >
+                                v{__APP_VERSION__}
+                            </a>
+                        </div>
+                        <div className="h-4 w-px bg-slate-700 hidden sm:block"></div>
+                        <div className="flex items-center space-x-2">
+                            <span className="text-sm text-slate-400">License</span>
+                            <span className="text-sm font-medium text-slate-300">MIT</span>
+                        </div>
+                    </div>
+                    
+                    <a 
+                        href="https://github.com/straybiker/BeamState" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-slate-600 transition-colors w-max"
+                    >
+                        <Github size={16} />
+                        <span className="text-sm font-medium">View on GitHub</span>
+                    </a>
                 </div>
             </div>
         </div>
