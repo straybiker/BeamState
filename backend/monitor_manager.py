@@ -190,8 +190,8 @@ class MonitorManager:
         # Aggregate results: node is UP only if ALL configured monitors succeed
         overall_success = all(r.success for r in monitor_results) if monitor_results else False
         
-        # Calculate average latency from successful monitors
-        successful_latencies = [r.latency_ms for r in monitor_results if r.success and r.latency_ms is not None]
+        # Calculate average latency from successful ICMP monitors only
+        successful_latencies = [r.latency_ms for r in monitor_results if r.protocol == "icmp" and r.success and r.latency_ms is not None]
         avg_latency = sum(successful_latencies) / len(successful_latencies) if successful_latencies else None
         
         # Determine packet loss (only relevant for PING)
