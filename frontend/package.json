@@ -14,11 +14,11 @@
     "autoprefixer": "^10.4.23",
     "axios": "^1.18.0",
     "lucide-react": "^0.562.0",
-    "postcss": "^8.5.16",
+    "postcss": "^8.5.26",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",
-    "react-router-dom": "^7.18.1",
+    "react-router-dom": "^7.18.2",
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
