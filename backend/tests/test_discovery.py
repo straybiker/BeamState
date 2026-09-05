@@ -12,7 +12,7 @@ from discovery_engine import discovery_engine
 
 @pytest.fixture
 def mock_snmp():
-    with patch("discovery_engine.getCmd") as mock_get_cmd:
+    with patch("discovery_engine.get_cmd") as mock_get_cmd:
         yield mock_get_cmd
 
 @pytest.fixture

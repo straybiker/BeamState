@@ -1,11 +1,45 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import api from '../api';
-import { FileText, ArrowDown, ArrowUp, Pause, Play, Wifi, WifiOff, Clock, PauseCircle } from 'lucide-react';
+import { FileText, ArrowDown, ArrowUp, Pause, Play, Wifi, WifiOff, Clock, PauseCircle, AlertTriangle } from 'lucide-react';
 
 const StateTrace = () => {
     const [events, setEvents] = useState([]);
     const [pinToBottom, setPinToBottom] = useState(true);
     const [connected, setConnected] = useState(false);
+    const [reliability, setReliability] = useState(null); // { day: {...}, month: {...}, nodes: [...] }
+    const [showReliability, setShowReliability] = useState(true);
+
+    const formatDuration = (s) => {
+        if (!s) return '0s';
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+        if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+        if (h) return `${h}h ${m}m`;
+        return `${m}m ${s % 60}s`;
+    };
+
+    // Reliability table: availability per node over 24 h and 30 d
+    useEffect(() => {
+        const load = async () => {
+            try {
+                const [availRes, nodesRes] = await Promise.all([
+                    api.get('/trace/availability?windows=24,720'),
+                    api.get('/config/nodes')
+                ]);
+                const day = availRes.data.windows['24'] || {};
+                const month = availRes.data.windows['720'] || {};
+                const nodes = nodesRes.data
+                    .map(n => ({ id: n.id, name: n.name, ip: n.ip, day: day[n.id], month: month[n.id] }))
+                    .filter(n => n.month && n.month.availability !== null)
+                    .sort((a, b) => (a.month.availability - b.month.availability) || (b.month.down_count - a.month.down_count));
+                setReliability({ nodes });
+            } catch (err) {
+                console.error('Failed to load reliability stats:', err);
+            }
+        };
+        Promise.resolve().then(load);
+        const interval = setInterval(load, 60000);
+        return () => clearInterval(interval);
+    }, []);
     const containerRef = useRef(null);
     const eventSourceRef = useRef(null);
 
@@ -77,6 +111,8 @@ const StateTrace = () => {
                 return { color: 'text-red-400', bg: 'bg-red-500/20', icon: WifiOff };
             case 'PENDING':
                 return { color: 'text-orange-400', bg: 'bg-orange-500/20', icon: Clock };
+            case 'DEGRADED':
+                return { color: 'text-amber-300', bg: 'bg-amber-500/20', icon: AlertTriangle };
             case 'PAUSED':
                 return { color: 'text-slate-400', bg: 'bg-slate-500/20', icon: PauseCircle };
             default:
@@ -124,6 +160,51 @@ const StateTrace = () => {
                     )}
                 </div>
             </header>
+
+            {/* Reliability summary */}
+            {reliability && reliability.nodes.length > 0 && (
+                <div className="bg-surface border border-slate-700 rounded-xl overflow-hidden">
+                    <button
+                        onClick={() => setShowReliability(!showReliability)}
+                        className="w-full flex items-center justify-between px-4 py-2 text-sm text-slate-300 hover:bg-slate-800/50"
+                    >
+                        <span className="font-semibold">Reliability (least available first)</span>
+                        <span className="text-xs text-slate-500">{showReliability ? 'hide' : 'show'}</span>
+                    </button>
+                    {showReliability && (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-slate-800/50 text-slate-400 text-xs uppercase">
+                                    <tr>
+                                        <th className="px-4 py-2">Node</th>
+                                        <th className="px-4 py-2 text-right">24 h</th>
+                                        <th className="px-4 py-2 text-right">30 d</th>
+                                        <th className="px-4 py-2 text-right">DOWN events (30 d)</th>
+                                        <th className="px-4 py-2 text-right">Downtime (30 d)</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800">
+                                    {reliability.nodes.slice(0, 10).map(n => {
+                                        const color = (v) => v === null || v === undefined ? 'text-slate-500' : v >= 99.9 ? 'text-green-400' : v >= 99 ? 'text-amber-300' : 'text-red-400';
+                                        return (
+                                            <tr key={n.id} className="hover:bg-slate-800/30">
+                                                <td className="px-4 py-2 text-slate-200">{n.name} <span className="text-slate-500 text-xs">({n.ip})</span></td>
+                                                <td className={`px-4 py-2 text-right font-mono ${color(n.day?.availability)}`}>{n.day?.availability ?? '-'}%</td>
+                                                <td className={`px-4 py-2 text-right font-mono ${color(n.month.availability)}`}>{n.month.availability}%</td>
+                                                <td className="px-4 py-2 text-right font-mono text-slate-300">{n.month.down_count}</td>
+                                                <td className="px-4 py-2 text-right font-mono text-slate-300">{formatDuration(n.month.downtime_seconds)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                            {reliability.nodes.length > 10 && (
+                                <div className="px-4 py-2 text-xs text-slate-500">Showing the 10 least available of {reliability.nodes.length} nodes.</div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Event count */}
             <div className="text-sm text-slate-500">

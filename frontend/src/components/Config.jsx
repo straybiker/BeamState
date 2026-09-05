@@ -32,10 +32,26 @@ const Config = () => {
         monitor_snmp: false,
         snmp_community: '',
         snmp_port: '',
-        notification_priority: null
+        notification_priority: null,
+        parent_id: ''
     });
     const [editingNode, setEditingNode] = useState(null); // Track which node is being edited
     const [appConfig, setAppConfig] = useState({ pushover: { priority: 0 } }); // For default priority label
+
+    // Empty form pre-filled with the default group, if one is configured
+    const emptyNode = (groupList) => ({
+        name: '',
+        ip: '',
+        group_id: groupList.find(g => g.is_default)?.id || '',
+        interval: '',
+        packet_count: '',
+        monitor_ping: true,
+        monitor_snmp: false,
+        snmp_community: '',
+        snmp_port: '',
+        notification_priority: null,
+        parent_id: ''
+    });
 
     const fetchData = async () => {
         try {
@@ -52,7 +68,7 @@ const Config = () => {
             try {
                 const appRes = await api.get('/config/app');
                 setAppConfig(appRes.data);
-            } catch (e) { /* ignore */ }
+            } catch { /* ignore */ }
         } catch (error) {
             console.error("Error fetching config:", error);
             toast.error("Failed to load configuration");
@@ -60,18 +76,10 @@ const Config = () => {
     };
 
     useEffect(() => {
-        fetchData();
+        // Async boundary keeps setState out of the synchronous effect body
+        Promise.resolve().then(fetchData);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-
-    // Update selected group in Add Node form when default group changes
-    useEffect(() => {
-        if (!editingNode && groups.length > 0) {
-            const defaultGroup = groups.find(g => g.is_default);
-            if (defaultGroup) {
-                setNewNode(prev => ({ ...prev, group_id: defaultGroup.id }));
-            }
-        }
-    }, [groups, editingNode]);
 
     const handleCreateGroup = async (e) => {
         e.preventDefault();
@@ -111,6 +119,7 @@ const Config = () => {
             payload.packet_count = payload.packet_count ? parseInt(payload.packet_count) : null;
             payload.snmp_community = payload.snmp_community || null;
             payload.snmp_port = payload.snmp_port ? parseInt(payload.snmp_port) : null;
+            payload.parent_id = payload.parent_id || null;
 
             // Validate that at least one protocol is enabled
             if (!payload.monitor_ping && !payload.monitor_snmp) {
@@ -129,17 +138,7 @@ const Config = () => {
             }
 
             // Reset form
-            setNewNode({
-                name: '',
-                ip: '',
-                group_id: '',
-                interval: '',
-                packet_count: '',
-                monitor_ping: true,
-                monitor_snmp: false,
-                snmp_community: '',
-                snmp_port: ''
-            });
+            setNewNode(emptyNode(groups));
             setEditingNode(null);
             fetchData();
         } catch (err) {
@@ -173,24 +172,14 @@ const Config = () => {
             monitor_snmp: node.monitor_snmp !== null ? node.monitor_snmp : false,
             snmp_community: node.snmp_community || '',
             snmp_port: node.snmp_port !== null ? node.snmp_port.toString() : '',
-            notification_priority: node.notification_priority !== null ? node.notification_priority : null
+            notification_priority: node.notification_priority !== null ? node.notification_priority : null,
+            parent_id: node.parent_id || ''
         });
     };
 
     const handleCancelEdit = () => {
         setEditingNode(null);
-        setNewNode({
-            name: '',
-            ip: '',
-            group_id: '',
-            interval: '',
-            packet_count: '',
-            monitor_ping: true,
-            monitor_snmp: false,
-            snmp_community: '',
-            snmp_port: '',
-            notification_priority: null
-        });
+        setNewNode(emptyNode(groups));
     };
 
     const [deleteConfirm, setDeleteConfirm] = useState({ type: null, id: null });
@@ -203,7 +192,7 @@ const Config = () => {
                 toast.success("Node deleted");
                 setDeleteConfirm({ type: null, id: null });
                 fetchData();
-            } catch (e) {
+            } catch {
                 toast.error("Failed to delete node");
             }
         } else {
@@ -221,7 +210,7 @@ const Config = () => {
                 toast.success("Group deleted");
                 setDeleteConfirm({ type: null, id: null });
                 fetchData();
-            } catch (e) {
+            } catch {
                 toast.error("Failed to delete group");
             }
         } else {
@@ -569,8 +558,9 @@ const Config = () => {
                             </div>
                         </div>
 
-                        {/* Protocol Selection */}
-                        <div className="border-t border-slate-700 pt-4">
+                        {/* Protocol Selection + Dependency */}
+                        <div className="border-t border-slate-700 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
                             <label className="block text-sm font-medium text-slate-400 mb-2">Monitoring Protocols</label>
                             <div className="flex gap-6">
                                 <label className="flex items-center space-x-2 cursor-pointer">
@@ -593,6 +583,22 @@ const Config = () => {
                                     />
                                     <span className="text-white">SNMP</span>
                                 </label>
+                            </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-2">Depends on (parent)</label>
+                                <select
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-white focus:ring-2 focus:ring-primary outline-none"
+                                    value={newNode.parent_id}
+                                    onChange={e => setNewNode({ ...newNode, parent_id: e.target.value })}
+                                >
+                                    <option value="">None</option>
+                                    {nodes
+                                        .filter(n => !editingNode || n.id !== editingNode.id)
+                                        .sort((a, b) => a.name.localeCompare(b.name))
+                                        .map(n => <option key={n.id} value={n.id}>{n.name} ({n.ip})</option>)}
+                                </select>
+                                <p className="text-xs text-slate-500 mt-1">While the parent is DOWN, this node's DOWN alert is suppressed.</p>
                             </div>
                         </div>
 
@@ -679,6 +685,7 @@ const Config = () => {
                                         <div className="flex items-center">Interval <ArrowUpDown size={14} className="ml-1" /></div>
                                     </th>
                                     <th className="px-4 py-3">Protocols</th>
+                                    <th className="px-4 py-3">Depends on</th>
                                     <th className="px-4 py-3 rounded-tr-lg text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -736,6 +743,9 @@ const Config = () => {
                                                         );
                                                     })()}
                                                 </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-slate-400 text-sm">
+                                                {n.parent_id ? (nodes.find(p => p.id === n.parent_id)?.name || 'Unknown') : <span className="text-slate-600">-</span>}
                                             </td>
                                             <td className="px-4 py-3 text-right">
                                                 <div className="flex items-center justify-end gap-2">

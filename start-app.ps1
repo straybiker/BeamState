@@ -5,17 +5,8 @@ Write-Host "BeamState Application Startup" -ForegroundColor Cyan
 Write-Host "==============================" -ForegroundColor Cyan
 Write-Host ""
 
-# Function to aggressive cleanup
-function Cleanup-Zombies {
-    Write-Host "Cleaning up potential zombie processes..." -ForegroundColor Yellow
-    Stop-Process -Name "python", "node", "uvicorn" -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-}
-
-# Run cleanup
-Cleanup-Zombies
-
-# Function to stop process on a specific port (Legacy check)
+# Function to stop the process that listens on a specific port.
+# Only BeamState's own ports are touched; other python/node processes are left alone.
 function Stop-PortProcess {
     param(
         [int]$Port,

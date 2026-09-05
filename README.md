@@ -14,9 +14,13 @@ A real-time network monitoring application that pings configured nodes, monitors
 - **Enhanced Network Discovery**: Scan subnets for ICMP and SNMP devices, merging results intelligently with existing configurations.
 - **Modern Dashboard**: Dark-themed UI showing node status, latency, SNMP availability, and detailed metrics.
 - **Web-Based Configuration**: Add, edit, and remove groups/nodes/metrics directly from the UI.
-- **Flexible Storage**: SQLite for configuration/cache, optional InfluxDB for time-series data.
-- **Bootstrap Config**: Define initial topology in `config.json` for automatic seeding.
-- **Smart Notifications**: Integrated Pushover alerts with priority management and intelligent storm throttling.
+- **Flexible Storage**: SQLite is the source of truth for topology, metric config and history. Optional InfluxDB for long-term time-series data.
+- **Bootstrap and Backup**: `config.json` seeds an empty database and is rewritten as an export after every change. `GET /config/export` and `POST /config/import` move a topology between hosts.
+- **Smart Notifications**: Pushover and generic JSON webhook (ntfy, Discord, Home Assistant) with priority management, storm throttling and recovery messages.
+- **Degraded State**: A reachable node with a metric outside its thresholds is DEGRADED, not DOWN. Metric alerts can require N consecutive samples before they raise.
+- **Dependencies**: Give a node a parent. While the parent is DOWN, the child's DOWN alert is suppressed.
+- **State History**: Every status change is stored in SQLite with configurable retention and shown on the Trace page.
+- **Heartbeat**: Optional deadman ping to Healthchecks.io, Uptime Kuma or Home Assistant so you notice when BeamState itself stops.
 
 ## Screenshots
 
@@ -49,7 +53,7 @@ The easiest way to run the application locally on Windows is via the provided Po
    **Important**: The `config.json` file contains sensitive data (InfluxDB tokens, network topology). It is gitignored and will not be committed to version control.
 
 3. **Start the Application**
-   Open PowerShell as **Administrator** (required for ICMP Ping) and run:
+   Open PowerShell and run (Administrator is only needed if ICMP raw sockets are blocked on your Windows build):
    ```powershell
    .\start-app.ps1
    ```
@@ -69,8 +73,7 @@ The easiest way to run the application locally on Windows is via the provided Po
 
 ## Docker Deployment
 
-For containerized deployment (e.g., on Proxmox LXC), use Docker Compose.
-**See [release_plan.md](release_plan.md) for detailed LXC/hardware specs.**
+For containerized deployment (e.g., on Proxmox LXC), use Docker Compose. Both containers carry healthchecks; the frontend waits for a healthy backend.
 
 ### 1. Installation
 
@@ -99,25 +102,68 @@ For containerized deployment (e.g., on Proxmox LXC), use Docker Compose.
 
 ### 2. Upgrading / Redeploying
 
-When you have new code (e.g., from `git pull`):
+Run this on the Proxmox host (inside the LXC) from the repository directory.
 
 ```bash
-# 1. Get latest code
+# 1. Back up the database and the config file (see Data Persistence for the online backup)
+docker exec beamstate-backend python -c "import sqlite3; s=sqlite3.connect('/app/data/beamstate.db'); d=sqlite3.connect('/app/data/beamstate.backup.db'); s.backup(d); d.close()"
+cp backend/config.json backend/config.json.bak
+
+# 2. Get the latest code
 git pull
 
-# 2. Rebuild and restart containers
-# --force-recreate is important to ensure the frontend picks up new configs
+# 3. Rebuild and restart
+# --force-recreate ensures the frontend picks up new configs
+docker compose up -d --build --force-recreate
+
+# 4. Verify
+docker compose ps                      # both containers "healthy" within about a minute
+docker compose logs -f backend         # Ctrl+C to stop following
+```
+
+Schema migrations run automatically at startup. Nothing needs to be done by hand for the database.
+
+**First start after upgrading to the source-of-truth release**, expect these log lines and actions:
+
+1. `Import policy: config.json modified after last export, importing` followed by `Import complete`. The old-format file is imported once (an upsert of what is already in the database) and rewritten with `exported_at` and the metric configuration. Later restarts skip the import.
+2. Open **Configuration → Groups** and re-enter any group-level SNMP settings (community, port, protocol flags). Earlier releases reset them to defaults on every restart; from now on they persist.
+3. Open **Configuration → Metrics** and set **Samples** to 2 or 3 on noisy metrics such as ICMP Latency. Existing metrics keep 1, which alerts on a single spike.
+4. Nodes with a metric outside its thresholds now show **DEGRADED** instead of DOWN. Review thresholds that were tuned around the old behaviour.
+5. Optional, under **Configuration → Settings**: enable the webhook channel, the heartbeat, and check the history retention values.
+
+If something goes wrong, roll back with the backups from step 1:
+
+```bash
+docker compose down
+cp backend/data/beamstate.backup.db backend/data/beamstate.db
+cp backend/config.json.bak backend/config.json
+git checkout <previous-commit>
 docker compose up -d --build --force-recreate
 ```
 
 ### 3. Access
 - **Frontend**: `http://<YOUR_IP>:3000`
-- **Backend API**: `http://<YOUR_IP>:8000`
+- **Backend API**: `http://<YOUR_IP>:8000` (Swagger at `/docs`)
+
+The API has no authentication yet. Keep both ports on the LAN or behind a reverse proxy with its own authentication.
 
 ### 4. Data Persistence
-- **Logs & Data**: Stored in `./backend/data/` (mapped to host).
-- **Configuration**: Stored in `./backend/config.json`.
-- **InfluxDB**: If external, data is stored on your InfluxDB instance (not in these containers).
+Both the database and the configuration file live on the host through bind mounts, so they survive `docker compose up -d --build --force-recreate`.
+
+| Host path | Contents | Role |
+|---|---|---|
+| `./backend/data/beamstate.db` | groups, nodes, dependencies, metric config, discovered interfaces, state history, metric samples | **source of truth** |
+| `./backend/config.json` | export of the topology and metric config plus `app_config` (settings and secrets) | mirror and backup, rewritten after every change |
+| `./backend/data/alert_states.json`, `system.log*`, `logs.json` | active metric alert levels, application log, monitoring data log | runtime state |
+
+- **Fresh volume or lost database**: the import policy sees an empty database and rebuilds groups, nodes, dependencies and metric configuration from `config.json`. Only history tables (state events, metric samples) are lost.
+- **Keep the mount on local disk.** SQLite does not work reliably on NFS or SMB shares because of file locking. A bind mount inside a Proxmox LXC is fine.
+- **Backups**: a Proxmox snapshot or backup of the LXC covers everything. To copy the database by hand while the container runs, use SQLite's online backup so you never copy a half-written file:
+  ```bash
+  docker exec beamstate-backend python -c "import sqlite3; s=sqlite3.connect('/app/data/beamstate.db'); d=sqlite3.connect('/app/data/beamstate.backup.db'); s.backup(d); d.close()"
+  ```
+- **Size**: metric samples are the only fast-growing table, roughly 1,500 rows per metric per day, pruned after `history.metric_retention_days` (default 3). Expect tens of megabytes.
+- **InfluxDB**: if enabled, time-series data is stored on your InfluxDB instance (not in these containers).
 
 ## Configuration
 
@@ -133,7 +179,21 @@ The `app_config` section in `config.json` contains global settings:
 - **Logging**: File logging settings and retention policy
 
 ### Network Topology
-The `groups` and `nodes` arrays define your network. On startup, the database syncs with this file.
+The **database is the source of truth**. `config.json` is an export of it: groups, nodes, dependencies and metric configuration, rewritten after every change in the UI and at startup. Treat the file as a backup you can copy to another host.
+
+- `GET /config/export` returns the same document without secrets.
+- `POST /config/import` upserts a document into the database. Nothing is deleted. Nodes that carry a `metrics` list get their metric configuration replaced, matched to definitions by name.
+- At startup `should_import_config()` in `backend/cleanup.py` decides whether the file is imported before the export runs. It imports in three cases: the file contains `"import": true` (consumed on the next start), the database has no groups yet, or the file was modified more than 5 seconds after its `exported_at` timestamp (hand edit or restored backup). A file without `exported_at` is imported once and rewritten in the new format.
+
+### Reliability and Reboots
+- `GET /trace/availability?windows=24,720` returns availability, downtime and DOWN count per node, computed from the state history. PENDING is not counted as downtime, PAUSED time is excluded. The dashboard shows the 24 h value per node, the Trace page lists the least available nodes.
+- SNMP nodes report **reboots**: a `sysUpTime` lower than the previous reading raises a `node_reboot` notification with the previous uptime. Toggle under Settings.
+
+### Metric History
+Every processed metric value is kept in `metric_samples` for `history.metric_retention_days` (default 3). `GET /metrics/history?hours=6&points=48` returns bucketed averages that feed the sparklines on the Metrics page. InfluxDB remains the choice for long-term trends.
+
+### Live Dashboard
+The dashboard subscribes to `GET /status/stream` (SSE). Each completed check pushes one node result; configuration changes push a `config` event so the page refetches groups and settings. Polling every 15 s stays as a fallback while the stream is disconnected.
 
 ### SNMP Metrics (`snmp.json`)
 Default SNMP metric definitions are stored in `backend/snmp.json`. You can add custom OIDs here.
@@ -153,42 +213,85 @@ Example:
 }
 ```
 
-### Notifications (New)
-BeamState supports **Pushover** for mobile push notifications.
-- **Setup**: Configure your User Key and API Token in the "Settings" tab.
-- **Priority**: Choose from -2 (Lowest) to 2 (Emergency). Emergency priority includes automatic retry (60s) and expiration (1h).
-- **Per-Node Priority**: Override the global priority on individual nodes for granular control.
-- **Smart Throttling**: 
-  - Prevents "alert fatigue" during major network outages.
-  - If more than **X** nodes fail within **Y** seconds (configurable), individual alerts are paused.
-  - A single **Global Alert** summary is sent instead.
+### Node States
+| State | Meaning |
+|---|---|
+| UP | Reachable, all metrics within thresholds |
+| DEGRADED | Reachable, at least one metric in WARNING or CRITICAL |
+| PENDING | A reachability check failed, retrying at 1/3 of the interval |
+| DOWN | Retries exhausted |
+| PAUSED | Node or group disabled |
+
+### Notifications
+Two channels, both driven from the "Settings" tab:
+- **Pushover**: User Key and API Token, priority -2 (Lowest) to 2 (Emergency, with retry every 60 s for 1 h). Per-node priority overrides the global value.
+- **Webhook**: JSON POST to any URL. Payload fields: `source`, `event` (`node_down`, `node_up`, `metric_warning`, `metric_critical`, `metric_resolved`, `alert_storm`), `title`, `message`, `priority`, `timestamp`, plus `node`, `ip`, `group`, `status` or metric details.
+- **Recovery messages**: When a DOWN node is reachable again, a message with the downtime is sent. Disable under Settings if you only want failures.
+- **Maintenance Mode**: Suppresses every channel.
+- **Smart Throttling**: If more than **X** nodes fail within **Y** seconds, individual alerts pause and one summary is sent.
+- **Dependencies**: Set "Depends on" for a node. A DOWN parent suppresses the child's DOWN alert and its recovery message.
+
+### Metric Alerts
+Per metric: condition (above/below), warning and critical thresholds, and **Samples**, the number of consecutive breaching samples before the alert raises. Recovery is immediate with a 5 % hysteresis band. Existing metrics keep 1 sample; set 2 or 3 on noisy metrics such as ICMP latency.
+
+### Heartbeat
+Enable under Settings with a ping URL (Healthchecks.io, Uptime Kuma push, Home Assistant webhook). BeamState sends a GET on the configured interval. The receiving service alerts you when the pings stop.
+
+### State History
+Every status transition is written to the `state_events` table and served by `GET /trace/events?limit=&node_id=&hours=`. Retention in days is set under Settings (0 keeps everything).
 
 ## Tech Stack
 
-- **Backend**: Python 3.11+, FastAPI, SQLAlchemy, pysnmp-lextudio, ping3.
+- **Backend**: Python 3.11+, FastAPI, SQLAlchemy, pysnmp 7, ping3.
 - **Frontend**: React, Vite, Tailwind CSS, Lucide Icons.
-- **Database**: SQLite.
+- **Database**: SQLite (`backend/data/beamstate.db`, override with the `DB_PATH` environment variable).
+- **CI**: GitHub Actions runs the backend tests, frontend lint and build, and both Docker builds on every push and merge request.
+
+## Development
+
+```bash
+cd backend && TESTING=1 python -m pytest tests -q
+cd frontend && npm run lint && npm run build
+```
+
+`TESTING=1` switches the backend to an in-memory database and disables the monitor loop.
 
 ## Project Structure
 
 ```
 BeamState/
 ├── backend/
-│   ├── main.py             # App entry point
-│   ├── snmp.json           # Default SNMP definitions
-│   ├── config.json         # Network topology
-│   ├── monitors/           # Ping and SNMP monitor logic
+│   ├── main.py             # App entry point, SSE status stream
+│   ├── monitor_manager.py  # Node state machine, alerts, reboot detection, heartbeat
+│   ├── metrics_processor.py# Thresholds, sample counting, metric history
+│   ├── notifications.py    # Pushover, webhook, Notifier facade
+│   ├── availability.py     # Uptime statistics from state history
+│   ├── cleanup.py          # Import policy and config.json import
+│   ├── utils.py            # Export to config.json
+│   ├── snmp.json           # Default SNMP metric definitions
+│   ├── config.json         # Export of the database + app settings (gitignored)
+│   ├── monitors/           # Ping, SNMP health check, SNMP collector
 │   ├── routers/            # API endpoints
-│   └── data/               # SQLite DB
+│   ├── migrations/         # Schema updates applied at startup
+│   ├── tests/              # pytest suite
+│   └── data/               # SQLite DB, alert state, logs (bind-mounted)
 ├── frontend/
 │   ├── src/components/     # React components
 │   └── public/             # Assets
-171: └── start-app.ps1           # Startup script
+├── .github/workflows/      # CI
+├── docker-compose.yml
+└── start-app.ps1           # Local dev startup (Windows)
 ```
 
 ## Recent Improvements
 
 ### ✅ Completed
+- **Database as source of truth** - config.json is an export with metric configuration; import/export endpoints; startup import policy.
+- **DEGRADED state, sample counting, recovery and reboot notifications, parent dependencies, webhook channel, heartbeat.**
+- **State history and availability** - Persisted transitions, uptime % per node, reliability table.
+- **Metric history and sparklines** - Short-term SQLite samples behind the Metrics page.
+- **Live dashboard over SSE** - One push per check instead of polling.
+- **pysnmp 7 migration and dependency fixes** - Builds again with pyasn1 0.6 and starlette 1.x.
 - **Per-Node Alert Priority** - Override global notification priority on individual nodes.
 - **Security Hardening** - Fixed secret leakage in API responses, dependency CVE patches.
 - **Enhanced Discovery UI** - Visual protocol badges and strict import filters based on scan settings.
@@ -210,6 +313,12 @@ BeamState/
 ### Notifications
 - [x] **Pushover Support** - Add Pushover integration for push notifications on node status changes
 - [x] **Smart Throttling** - Prevent alert spam during mass outages
+- [x] **Webhook channel, recovery messages, parent dependencies, heartbeat**
+- [ ] **Scheduled maintenance windows** - Per-group windows with start and end time
+
+### Coverage
+- [ ] **Service checks** - TCP port, HTTP status and DNS monitors next to ICMP and SNMP
+- [ ] **API authentication** - Required before exposing the UI outside the LAN
 
 ### UI/UX Improvements
 - [ ] **Mobile Config Layout** - Fix node configuration table wrapping on mobile devices (too small)

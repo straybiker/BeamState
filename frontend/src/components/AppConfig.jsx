@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Save, RefreshCw, Database, FileText, Bell, Info, Github } from 'lucide-react';
+import { Save, RefreshCw, Database, FileText, Bell, Info, Github, Webhook, HeartPulse } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '../api';
 
@@ -23,6 +23,10 @@ const AppConfig = () => {
             if (!data.influxdb) data.influxdb = { enabled: false };
             if (!data.logging) data.logging = { file_enabled: false };
             if (!data.pushover.throttling_enabled) data.pushover.throttling_enabled = false;
+            if (!data.webhook) data.webhook = { enabled: false, url: '' };
+            if (!data.alerting) data.alerting = { notify_recovery: true, notify_reboot: true };
+            if (!data.heartbeat) data.heartbeat = { enabled: false, url: '', interval: 60 };
+            if (!data.history) data.history = { retention_days: 90, metric_retention_days: 3 };
             setConfig(data);
         } catch (error) {
             console.error("Failed to load app config:", error);
@@ -196,6 +200,30 @@ const AppConfig = () => {
                             />
                             <p className="text-xs text-slate-500">Maximum lines to keep in the log file.</p>
                         </div>
+
+                        <div className="space-y-1 pt-4 border-t border-slate-700/50">
+                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">State History Retention (Days)</label>
+                            <input
+                                type="number"
+                                min="0"
+                                value={config.history?.retention_days ?? 90}
+                                onChange={(e) => handleChange('history', 'retention_days', parseInt(e.target.value) || 0)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
+                            />
+                            <p className="text-xs text-slate-500">Node state changes are stored in the database and shown on the Trace page. 0 keeps them forever.</p>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Metric History Retention (Days)</label>
+                            <input
+                                type="number"
+                                min="0"
+                                value={config.history?.metric_retention_days ?? 3}
+                                onChange={(e) => handleChange('history', 'metric_retention_days', parseInt(e.target.value) || 0)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
+                            />
+                            <p className="text-xs text-slate-500">Feeds the sparklines on the Metrics page. Roughly 1,500 rows per metric per day at a 60 s interval. Use InfluxDB for long-term trends.</p>
+                        </div>
                     </div>
                 </div>
 
@@ -277,7 +305,39 @@ const AppConfig = () => {
                                 <label htmlFor="maintenance-mode" className="text-sm font-medium text-amber-500 block">
                                     Maintenance Mode
                                 </label>
-                                <p className="text-xs text-slate-400">Suppress ALL notifications while active</p>
+                                <p className="text-xs text-slate-400">Suppress ALL notifications on every channel while active</p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2 pl-6 border-l-2 border-slate-700">
+                            <input
+                                type="checkbox"
+                                id="notify-recovery"
+                                checked={config.alerting?.notify_recovery ?? true}
+                                onChange={(e) => handleChange('alerting', 'notify_recovery', e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-primary focus:ring-primary"
+                            />
+                            <div>
+                                <label htmlFor="notify-recovery" className="text-sm font-medium text-slate-200 block">
+                                    Recovery notifications
+                                </label>
+                                <p className="text-xs text-slate-400">Send a message when a DOWN node is reachable again, with the downtime</p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center space-x-2 pl-6 border-l-2 border-slate-700">
+                            <input
+                                type="checkbox"
+                                id="notify-reboot"
+                                checked={config.alerting?.notify_reboot ?? true}
+                                onChange={(e) => handleChange('alerting', 'notify_reboot', e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-primary focus:ring-primary"
+                            />
+                            <div>
+                                <label htmlFor="notify-reboot" className="text-sm font-medium text-slate-200 block">
+                                    Reboot notifications
+                                </label>
+                                <p className="text-xs text-slate-400">Detected from an SNMP uptime reset. Catches restarts that fall between two ping checks.</p>
                             </div>
                         </div>
 
@@ -383,6 +443,97 @@ const AppConfig = () => {
                                     </div>
                                 )}
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Webhook Notifications */}
+                <div className="bg-surface rounded-xl p-6 border border-slate-700/50">
+                    <div className="flex items-center space-x-3 mb-4">
+                        <div className="p-2 bg-cyan-500/20 text-cyan-400 rounded-lg">
+                            <Webhook size={24} />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold text-white">Webhook</h3>
+                            <p className="text-xs text-slate-400">JSON POST for ntfy, Discord, Home Assistant, n8n</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="flex items-center space-x-2">
+                            <input
+                                type="checkbox"
+                                id="webhook-enabled"
+                                checked={config.webhook?.enabled || false}
+                                onChange={(e) => handleChange('webhook', 'enabled', e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="webhook-enabled" className="text-sm font-medium text-slate-200">
+                                Enable Webhook
+                            </label>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">URL</label>
+                            <input
+                                type="password"
+                                value={config.webhook?.url || ''}
+                                onChange={(e) => handleChange('webhook', 'url', e.target.value)}
+                                placeholder="https://ntfy.sh/your-topic"
+                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none font-mono"
+                            />
+                            <p className="text-xs text-slate-500">Hidden because the URL often contains a token. Every alert is sent as JSON with event, title, message, priority, node, ip, group and status.</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Heartbeat */}
+                <div className="bg-surface rounded-xl p-6 border border-slate-700/50">
+                    <div className="flex items-center space-x-3 mb-4">
+                        <div className="p-2 bg-rose-500/20 text-rose-400 rounded-lg">
+                            <HeartPulse size={24} />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold text-white">Heartbeat</h3>
+                            <p className="text-xs text-slate-400">Prove that BeamState itself is alive</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="flex items-center space-x-2">
+                            <input
+                                type="checkbox"
+                                id="heartbeat-enabled"
+                                checked={config.heartbeat?.enabled || false}
+                                onChange={(e) => handleChange('heartbeat', 'enabled', e.target.checked)}
+                                className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-primary focus:ring-primary"
+                            />
+                            <label htmlFor="heartbeat-enabled" className="text-sm font-medium text-slate-200">
+                                Enable Heartbeat
+                            </label>
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Ping URL</label>
+                            <input
+                                type="password"
+                                value={config.heartbeat?.url || ''}
+                                onChange={(e) => handleChange('heartbeat', 'url', e.target.value)}
+                                placeholder="https://hc-ping.com/your-uuid"
+                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none font-mono"
+                            />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Interval (Seconds)</label>
+                            <input
+                                type="number"
+                                min="10"
+                                value={config.heartbeat?.interval ?? 60}
+                                onChange={(e) => handleChange('heartbeat', 'interval', parseInt(e.target.value) || 60)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
+                            />
+                            <p className="text-xs text-slate-500">BeamState sends a GET request on this interval. Let Healthchecks.io, Uptime Kuma or Home Assistant alert you when it stops.</p>
                         </div>
                     </div>
                 </div>

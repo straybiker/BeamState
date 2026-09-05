@@ -4,7 +4,8 @@ Trace Router - Endpoints for state change event streaming
 import asyncio
 import json
 import logging
-from fastapi import APIRouter, Request
+from typing import Optional
+from fastapi import APIRouter, Request, Query
 from fastapi.responses import StreamingResponse
 from trace_manager import trace_manager
 
@@ -14,10 +15,35 @@ router = APIRouter(prefix="/trace", tags=["trace"])
 
 
 @router.get("/events")
-async def get_recent_events(limit: int = 100):
-    """Get recent state change events"""
-    events = trace_manager.get_recent_events(limit)
+async def get_recent_events(
+    limit: int = Query(100, ge=1, le=5000),
+    node_id: Optional[str] = None,
+    hours: Optional[float] = Query(None, gt=0, description="Only events from the last N hours"),
+):
+    """Get state change events from history, oldest first."""
+    events = await asyncio.to_thread(trace_manager.query, limit, node_id, hours)
     return {"events": events}
+
+
+@router.get("/availability")
+async def get_availability(request: Request, windows: str = Query("24,720", description="Comma-separated window sizes in hours")):
+    """Availability, downtime and DOWN count per node for each requested window."""
+    from availability import compute_availability
+    try:
+        hours_list = [float(h) for h in windows.split(",") if h.strip()]
+    except ValueError:
+        hours_list = [24.0, 720.0]
+    hours_list = [h for h in hours_list if 0 < h <= 24 * 365][:4]
+
+    current = {}
+    pinger = getattr(request.app.state, "pinger", None)
+    if pinger:
+        current = {r["node_id"]: r["status"] for r in pinger.latest_results.values()}
+
+    out = {}
+    for h in hours_list:
+        out[str(int(h) if h.is_integer() else h)] = await asyncio.to_thread(compute_availability, h, current)
+    return {"windows": out}
 
 
 @router.get("/stream")

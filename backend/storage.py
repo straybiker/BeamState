@@ -31,7 +31,6 @@ class Storage:
                 "file_enabled": True,
                 "file_path": "data/logs.json",
                 "retention_lines": 200,
-                "retention_lines": 200,
                 "log_level": "INFO"
             },
             "pushover": {
@@ -44,6 +43,23 @@ class Storage:
                 "alert_threshold": 5,
                 "alert_window": 60,
                 "maintenance_mode": False
+            },
+            "webhook": {
+                "enabled": False,
+                "url": ""
+            },
+            "alerting": {
+                "notify_recovery": True,
+                "notify_reboot": True
+            },
+            "heartbeat": {
+                "enabled": False,
+                "url": "",
+                "interval": 60
+            },
+            "history": {
+                "retention_days": 90,
+                "metric_retention_days": 3
             }
         }
         
@@ -55,12 +71,9 @@ class Storage:
                         # Deep merge or just update keys
                         app_config = data["app_config"]
                         logger.info(f"Storage: Reloading app_config keys: {list(app_config.keys())}")
-                        if "influxdb" in app_config:
-                            self.config["influxdb"].update(app_config["influxdb"])
-                        if "logging" in app_config:
-                            self.config["logging"].update(app_config["logging"])
-                        if "pushover" in app_config:
-                            self.config["pushover"].update(app_config["pushover"])
+                        for section in self.config:
+                            if isinstance(app_config.get(section), dict):
+                                self.config[section].update(app_config[section])
                             
             # Setup InfluxDB
             influx_conf = self.config["influxdb"]
@@ -168,7 +181,8 @@ class Storage:
                     .tag("protocol", protocol)
                     .field("latency", float(latency) if latency is not None else 0.0)
                     .field("packet_loss", float(raw_data.get("packet_loss", 0.0)))
-                    .field("status_code", 1 if status in ["UP", "PAUSED"] else 0)
+                    .field("status_code", 1 if status in ["UP", "PAUSED", "DEGRADED"] else 0)
+                    .field("degraded", 1 if status == "DEGRADED" else 0)
                     .field("success", 1 if success else 0)
                     .field("responses", response_str if response_str else "none")
                 )

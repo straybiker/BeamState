@@ -1,0 +1,17 @@
+# Runtime data and secrets are mounted at run time (see docker-compose.yml).
+# They must never be baked into the image.
+config.json
+config - Copy.json
+config.json.example
+data/
+*.log
+*.db
+
+# Development artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+venv/
+.venv/
+.env

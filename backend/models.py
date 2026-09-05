@@ -55,7 +55,11 @@ class NodeDB(Base):
     # Notification overrides
     notification_priority = Column(Integer, nullable=True)  # -2 to 2, None = use app default
 
+    # Dependency: when the parent is DOWN, this node's DOWN alert is suppressed
+    parent_id = Column(String, ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True)
+
     group = relationship("GroupDB", back_populates="nodes")
+    parent = relationship("NodeDB", remote_side="NodeDB.id", foreign_keys=[parent_id], post_update=True)
     node_metrics = relationship("NodeMetricDB", back_populates="node", cascade="all, delete-orphan")
     interfaces = relationship("NodeInterfaceDB", back_populates="node", cascade="all, delete-orphan")
 
@@ -88,11 +92,33 @@ class NodeMetricDB(Base):
     critical_threshold = Column(Float, nullable=True)
     alert_enabled = Column(Boolean, default=False)
     alert_condition = Column(String, default="gt") # 'gt' or 'lt'
-    
+    alert_min_samples = Column(Integer, default=1)  # Consecutive breaching samples before an alert raises
+
     enabled = Column(Boolean, default=True)
-    
+
     node = relationship("NodeDB", back_populates="node_metrics")
     metric_definition = relationship("MetricDefinitionDB", back_populates="node_metrics")
+
+class MetricSampleDB(Base):
+    """Short-term metric history (rates for counters, values for gauges)."""
+    __tablename__ = "metric_samples"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    node_metric_id = Column(String, index=True, nullable=False)
+    timestamp = Column(Float, index=True, nullable=False)
+    value = Column(Float, nullable=False)
+
+class StateEventDB(Base):
+    """Persisted node state transition (history for the trace page and reporting)."""
+    __tablename__ = "state_events"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(Float, nullable=False, index=True)
+    node_id = Column(String, index=True)
+    node_name = Column(String)
+    ip = Column(String)
+    group_name = Column(String)
+    old_status = Column(String)
+    new_status = Column(String)
+    reason = Column(String)
 
 class NodeInterfaceDB(Base):
     __tablename__ = "node_interfaces"
@@ -123,7 +149,8 @@ class NodeBase(BaseModel):
     snmp_community: Optional[str] = None
     snmp_port: Optional[int] = None
     notification_priority: Optional[int] = None  # -2 to 2, None = use app default
-    
+    parent_id: Optional[str] = None  # Upstream node; suppresses alerts while the parent is DOWN
+
     @field_validator('ip')
     @classmethod
     def validate_ip_address(cls, v: str) -> str:
@@ -197,7 +224,15 @@ class NodeMetricBase(BaseModel):
     critical_threshold: Optional[float] = None
     alert_enabled: bool = False
     alert_condition: str = "gt" # 'gt' or 'lt'
+    alert_min_samples: int = 1
     enabled: bool = True
+
+    @field_validator('alert_min_samples')
+    @classmethod
+    def validate_min_samples(cls, v: int) -> int:
+        if v < 1 or v > 60:
+            raise ValueError('alert_min_samples must be between 1 and 60')
+        return v
 
 class NodeMetricCreate(NodeMetricBase):
     pass

@@ -12,6 +12,32 @@
             "file_path": "data/logs.json",
             "retention_lines": 200,
             "log_level": "INFO"
+        },
+        "pushover": {
+            "enabled": false,
+            "token": "",
+            "user_key": "",
+            "priority": 0,
+            "message_template": "Node {name} ({ip}) is DOWN",
+            "throttling_enabled": true,
+            "alert_threshold": 5,
+            "alert_window": 60,
+            "maintenance_mode": false
+        },
+        "webhook": {
+            "enabled": false,
+            "url": ""
+        },
+        "alerting": {
+            "notify_recovery": true
+        },
+        "heartbeat": {
+            "enabled": false,
+            "url": "",
+            "interval": 60
+        },
+        "history": {
+            "retention_days": 90
         }
     },
     "groups": [
@@ -41,7 +67,9 @@
             "monitor_ping": true,
             "monitor_snmp": true,
             "snmp_community": null,
-            "snmp_port": null
+            "snmp_port": null,
+            "notification_priority": null,
+            "parent_id": null
         }
     ]
 }

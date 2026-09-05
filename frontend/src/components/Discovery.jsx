@@ -32,7 +32,7 @@ const Discovery = () => {
                     setSelectedGroup(res.data[0].id);
                 }
             })
-            .catch(err => toast.error("Failed to load groups"));
+            .catch(() => toast.error("Failed to load groups"));
     };
 
     const checkStatus = async () => {
