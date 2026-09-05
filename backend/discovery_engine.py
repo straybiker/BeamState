@@ -6,7 +6,10 @@ import socket
 from typing import List, Dict, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 from ping3 import ping
-from pysnmp.hlapi.asyncio import *
+from pysnmp.hlapi.v3arch.asyncio import (
+    SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
+    ObjectType, ObjectIdentity, get_cmd,
+)
 
 logger = logging.getLogger("BeamState.Discovery")
 
@@ -174,10 +177,11 @@ class DiscoveryEngine:
         for community in communities:
             try:
                 # Get sysDescr (1.3.6.1.2.1.1.1.0) and sysObjectID (1.3.6.1.2.1.1.2.0)
-                errorIndication, errorStatus, errorIndex, varBinds = await getCmd(
+                target = await UdpTransportTarget.create((ip, 161), timeout=1.5, retries=1)
+                errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
                     self.snmp_engine,
                     CommunityData(community, mpModel=1),
-                    UdpTransportTarget((ip, 161), timeout=1.5, retries=1),
+                    target,
                     ContextData(),
                     ObjectType(ObjectIdentity('1.3.6.1.2.1.1.1.0')), # sysDescr
                     ObjectType(ObjectIdentity('1.3.6.1.2.1.1.2.0')), # sysObjectID

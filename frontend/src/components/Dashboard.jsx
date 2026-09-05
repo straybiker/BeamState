@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api';
-import { Wifi, WifiOff, Clock, Activity, PauseCircle, FilterX } from 'lucide-react';
+import { Wifi, WifiOff, Clock, Activity, PauseCircle, FilterX, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const Dashboard = () => {
@@ -54,22 +54,59 @@ const Dashboard = () => {
         }
     };
 
-    useEffect(() => {
-        fetchData();
-        // Poll status periodically
-        const interval = setInterval(() => {
-            fetchStatusOnly();
-        }, 5000);
+    const [availability, setAvailability] = useState({ '24': {}, '720': {} });
+    const [live, setLive] = useState(false);
 
-        // Poll configuration periodically to catch added/removed nodes and maintenance mode
-        const configInterval = setInterval(() => {
-            api.get('/config/groups').then(res => setGroups(res.data)).catch(e => console.error(e));
-            fetchAppConfig();
-        }, 5000);
+    const fetchAvailability = async () => {
+        try {
+            const res = await api.get('/trace/availability?windows=24,720');
+            setAvailability(res.data.windows || {});
+        } catch (error) {
+            console.error("Availability error:", error);
+        }
+    };
+
+    useEffect(() => {
+        Promise.resolve().then(() => { fetchData(); fetchAvailability(); });
+
+        // Live updates over SSE: one message per completed node check,
+        // plus a "config" message whenever groups, nodes or settings change.
+        const baseUrl = api.defaults.baseURL || '';
+        const source = new EventSource(`${baseUrl}/status/stream`);
+        source.onopen = () => setLive(true);
+        source.onerror = () => setLive(false);
+        source.onmessage = (e) => {
+            try {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'snapshot') {
+                    setStatusData(msg.data);
+                } else if (msg.type === 'node') {
+                    setStatusData(prev => {
+                        const idx = prev.findIndex(r => r.node_id === msg.data.node_id);
+                        if (idx === -1) return [...prev, msg.data];
+                        const next = prev.slice();
+                        next[idx] = msg.data;
+                        return next;
+                    });
+                } else if (msg.type === 'config') {
+                    api.get('/config/groups').then(res => setGroups(res.data)).catch(err => console.error(err));
+                    fetchAppConfig();
+                }
+            } catch (err) {
+                console.error('Bad SSE message', err);
+            }
+        };
+
+        // Safety net while the stream is down, and periodic availability refresh
+        const fallback = setInterval(() => {
+            if (source.readyState !== EventSource.OPEN) fetchStatusOnly();
+        }, 15000);
+        const availabilityInterval = setInterval(fetchAvailability, 60000);
 
         return () => {
-            clearInterval(interval);
-            clearInterval(configInterval);
+            source.close();
+            clearInterval(fallback);
+            clearInterval(availabilityInterval);
         };
     }, []);
 
@@ -95,7 +132,7 @@ const Dashboard = () => {
     if (loading && groups.length === 0) return <div className="text-center p-10 text-slate-400">Loading Dashboard...</div>;
 
     // Calculate stats ensuring consistency
-    let stats = { up: 0, down: 0, warning: 0, paused: 0, total: 0 };
+    let stats = { up: 0, down: 0, warning: 0, degraded: 0, paused: 0, total: 0 };
     groups.forEach(group => {
         const groupResults = resultsByGroup[group.name] || [];
         const resultsMap = new Map(groupResults.map(r => [r.node_id, r]));
@@ -109,6 +146,7 @@ const Dashboard = () => {
             if (status === 'UP') stats.up++;
             else if (status === 'DOWN') stats.down++;
             else if (status === 'PENDING') stats.warning++;
+            else if (status === 'DEGRADED') stats.degraded++;
             else if (status === 'PAUSED') stats.paused++;
         });
     });
@@ -118,7 +156,13 @@ const Dashboard = () => {
             <header className="mb-6 flex items-center justify-between">
                 <div>
                     <h2 className="text-3xl font-bold text-slate-100">Monitoring Dashboard</h2>
-                    <p className="text-slate-400">Real-time status of monitored devices</p>
+                    <p className="text-slate-400 flex items-center gap-2">
+                        Real-time status of monitored devices
+                        <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded ${live ? 'bg-green-500/10 text-green-400' : 'bg-slate-700 text-slate-400'}`} title={live ? 'Receiving live updates' : 'Stream disconnected, polling every 15 s'}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${live ? 'bg-green-400 animate-pulse' : 'bg-slate-500'}`}></span>
+                            {live ? 'Live' : 'Polling'}
+                        </span>
+                    </p>
                 </div>
                 <img
                     src="/logo_transparant.png"
@@ -141,7 +185,7 @@ const Dashboard = () => {
             )}
 
             {/* Summary Stats / Filter Controls */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
                 <div
                     onClick={() => toggleFilter('UP')}
                     className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${activeFilter === 'UP' ? 'bg-green-500/10 border-green-500/50 ring-1 ring-green-500/50' : 'bg-slate-800/50 border-slate-700/50 hover:bg-slate-800'}`}
@@ -169,14 +213,29 @@ const Dashboard = () => {
                 </div>
 
                 <div
+                    onClick={() => toggleFilter('DEGRADED')}
+                    className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${activeFilter === 'DEGRADED' ? 'bg-amber-500/10 border-amber-500/50 ring-1 ring-amber-500/50' : 'bg-slate-800/50 border-slate-700/50 hover:bg-slate-800'}`}
+                    title="Reachable, but a metric is outside its thresholds"
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-amber-500/10">
+                            <AlertTriangle size={20} className="text-amber-300" />
+                        </div>
+                        <div className="text-slate-400 text-sm font-semibold uppercase tracking-wider">Degraded</div>
+                    </div>
+                    <div className="text-2xl font-bold text-amber-300 leading-none">{stats.degraded}</div>
+                </div>
+
+                <div
                     onClick={() => toggleFilter('PENDING')}
                     className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${activeFilter === 'PENDING' ? 'bg-orange-500/10 border-orange-500/50 ring-1 ring-orange-500/50' : 'bg-slate-800/50 border-slate-700/50 hover:bg-slate-800'}`}
+                    title="A check failed, retrying before marking DOWN"
                 >
                     <div className="flex items-center gap-3">
                         <div className="p-2 rounded-lg bg-orange-500/10">
                             <Clock size={20} className="text-orange-400" />
                         </div>
-                        <div className="text-slate-400 text-sm font-semibold uppercase tracking-wider">Warning</div>
+                        <div className="text-slate-400 text-sm font-semibold uppercase tracking-wider">Retrying</div>
                     </div>
                     <div className="text-2xl font-bold text-orange-400 leading-none">{stats.warning}</div>
                 </div>
@@ -297,12 +356,18 @@ const Dashboard = () => {
                                     const isUp = status === 'UP';
                                     const isPending = status === 'PENDING';
                                     const isPaused = status === 'PAUSED';
+                                    const isDegraded = status === 'DEGRADED';
 
                                     if (isUp) {
                                         statusColor = 'text-green-400';
                                         bgColor = 'bg-green-500/20';
                                         icon = <Wifi size={20} />;
                                         borderColor = 'border-slate-700/50';
+                                    } else if (isDegraded) {
+                                        statusColor = 'text-amber-300';
+                                        bgColor = 'bg-amber-500/20';
+                                        icon = <AlertTriangle size={20} />;
+                                        borderColor = 'border-amber-500/30';
                                     } else if (isPending) {
                                         statusColor = 'text-orange-400';
                                         bgColor = 'bg-orange-500/20';
@@ -347,12 +412,28 @@ const Dashboard = () => {
                                             <div className="col-span-4 text-right">
                                                 <div className={`text-sm font-bold ${statusColor}`}>
                                                     {status}
-                                                    {isPending && statusNode && <span className="text-xs ml-1 opacity-75">({statusNode.retry_count || 0})</span>}
+                                                    {isPending && statusNode && statusNode.failure_count > 0 && (
+                                                        <span className="text-xs ml-1 opacity-75" title="Failed checks / retries before DOWN">
+                                                            ({statusNode.failure_count}/{(statusNode.max_retries ?? 0) + 1})
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <div className="text-xs text-slate-500 flex items-center justify-end space-x-1">
                                                     <Activity size={12} />
                                                     <span>{latency ? Math.round(latency) : '-'}ms</span>
                                                 </div>
+                                                {(() => {
+                                                    const day = availability['24']?.[configNode.id];
+                                                    const month = availability['720']?.[configNode.id];
+                                                    if (!day || day.availability === null) return null;
+                                                    const pctColor = day.availability >= 99.9 ? 'text-slate-500' : day.availability >= 99 ? 'text-amber-400' : 'text-red-400';
+                                                    return (
+                                                        <div className={`text-xs ${pctColor}`} title={`Availability 24 h: ${day.availability}% · 30 d: ${month?.availability ?? '-'}% · DOWN events 30 d: ${month?.down_count ?? 0}`}>
+                                                            {day.availability.toFixed(day.availability < 99.95 ? 2 : 1)}%
+                                                            {month?.down_count > 0 && <span className="ml-1 text-slate-600">· {month.down_count}↓</span>}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     );

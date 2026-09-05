@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 from database import get_db
 from models import MetricDefinition, MetricDefinitionDB, NodeMetric, NodeMetricCreate, NodeMetricDB, NodeDB, NodeInterface, NodeInterfaceDB, NodeInterfaceBase
-# Note: pysnmp imports are done inside _sync_discover_interfaces to avoid async/sync conflicts
+from pysnmp.hlapi.v3arch.asyncio import (
+    SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
+    ObjectType, ObjectIdentity, walk_cmd,
+)
 import uuid
 import logging
-import asyncio
 
 logger = logging.getLogger("BeamState.Metrics")
 
@@ -32,6 +34,11 @@ def read_metric_definitions(
     return query.all()
 
 # --- NODE METRICS Configuration ---
+
+@router.get("/nodes", response_model=List[NodeMetric])
+def read_all_node_metrics(db: Session = Depends(get_db)):
+    """Get configured metrics for every node in one call (dashboard bootstrap)"""
+    return db.query(NodeMetricDB).all()
 
 @router.get("/nodes/{node_id}", response_model=List[NodeMetric])
 def read_node_metrics(node_id: str, db: Session = Depends(get_db)):
@@ -66,28 +73,26 @@ def set_node_metrics(node_id: str, metrics: List[NodeMetricCreate], db: Session 
 
 # --- INTERFACE DISCOVERY ---
 
-def _sync_discover_interfaces(ip: str, port: int, community: str) -> list:
-    """Synchronous SNMP interface discovery - runs in thread pool"""
-    from pysnmp.hlapi import (
-        SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
-        ObjectType, ObjectIdentity, nextCmd
-    )
-    
+async def _discover_interfaces(ip: str, port: int, community: str) -> list:
+    """Walk the ifTable columns over SNMP v2c and merge them per ifIndex."""
     interfaces = {}
-    
-    # helper to fetch a column
-    def fetch_column(oid_base, key_name):
-        for errorIndication, errorStatus, errorIndex, varBinds in nextCmd(
-            SnmpEngine(),
+    engine = SnmpEngine()
+    target = await UdpTransportTarget.create((ip, port), timeout=2.0, retries=1)
+
+    async def fetch_column(oid_base, key_name):
+        async for errorIndication, errorStatus, errorIndex, varBinds in walk_cmd(
+            engine,
             CommunityData(community, mpModel=1),  # v2c
-            UdpTransportTarget((ip, port), timeout=2.0, retries=1),
+            target,
             ContextData(),
             ObjectType(ObjectIdentity(oid_base)),
-            lexicographicMode=False
+            lexicographicMode=False  # Stop at the end of this column
         ):
             if errorIndication or errorStatus:
-                continue # Skip errors for secondary columns to be safe
-            
+                # Unreachable host or unsupported column: stop this walk, keep what we have
+                logger.debug(f"Walk of {oid_base} on {ip} stopped: {errorIndication or errorStatus.prettyPrint()}")
+                break
+
             for varBind in varBinds:
                 oid = varBind[0]
                 val = varBind[1]
@@ -99,24 +104,16 @@ def _sync_discover_interfaces(ip: str, port: int, community: str) -> list:
                 except Exception:
                     pass
 
-    # 1. Fetch ifDescr (Base)
-    fetch_column('1.3.6.1.2.1.2.2.1.2', 'name')
-    
-    # 2. Fetch ifType
-    fetch_column('1.3.6.1.2.1.2.2.1.3', 'type')
-    
-    # 3. Fetch ifPhysAddress
-    fetch_column('1.3.6.1.2.1.2.2.1.6', 'mac_address')
-    
-    # 4. Fetch ifAdminStatus
-    fetch_column('1.3.6.1.2.1.2.2.1.7', 'admin_status')
-    
-    # 5. Fetch ifOperStatus
-    fetch_column('1.3.6.1.2.1.2.2.1.8', 'oper_status')
-    
-    # Convert dict to list
-    result_list = sorted(interfaces.values(), key=lambda x: x["index"])
-    return result_list
+    try:
+        await fetch_column('1.3.6.1.2.1.2.2.1.2', 'name')          # ifDescr
+        await fetch_column('1.3.6.1.2.1.2.2.1.3', 'type')          # ifType
+        await fetch_column('1.3.6.1.2.1.2.2.1.6', 'mac_address')   # ifPhysAddress
+        await fetch_column('1.3.6.1.2.1.2.2.1.7', 'admin_status')  # ifAdminStatus
+        await fetch_column('1.3.6.1.2.1.2.2.1.8', 'oper_status')   # ifOperStatus
+    finally:
+        engine.close_dispatcher()
+
+    return sorted(interfaces.values(), key=lambda x: x["index"])
 
 
 @router.get("/discover-interfaces/{node_id}", response_model=List[NodeInterface])
@@ -141,13 +138,7 @@ async def discover_interfaces(node_id: str, db: Session = Depends(get_db)):
         
         logger.info(f"Targeting {node.ip}:{port} with v2c, community={community}")
 
-        # Run synchronous SNMP in thread pool to avoid asyncio issues
-        loop = asyncio.get_event_loop()
-        interfaces = await loop.run_in_executor(
-            None,  # Default executor
-            _sync_discover_interfaces,
-            node.ip, port, community
-        )
+        interfaces = await _discover_interfaces(node.ip, port, community)
         
         # Persist interfaces to DB
         # 1. Get existing interfaces
@@ -241,6 +232,37 @@ def update_interface_config(node_id: str, config: List[NodeInterfaceBase], db: S
     return db.query(NodeInterfaceDB).filter(NodeInterfaceDB.node_id == node_id).order_by(NodeInterfaceDB.index).all()
 
 # --- DATA RETRIEVAL ---
+
+@router.get("/history")
+def get_metric_history(
+    hours: float = Query(6, gt=0, le=24 * 30),
+    points: int = Query(48, ge=2, le=1000),
+    node_metric_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Downsampled metric history from SQLite: {node_metric_id: [[timestamp, avg_value], ...]}.
+    Each series is bucketed into 'points' equal intervals over the window.
+    """
+    from sqlalchemy import func, cast, Integer
+    from models import MetricSampleDB
+    import time
+
+    now = time.time()
+    start = now - hours * 3600
+    bucket = max(1.0, (hours * 3600) / points)
+
+    bucket_expr = cast(MetricSampleDB.timestamp / bucket, Integer)
+    q = (db.query(MetricSampleDB.node_metric_id, bucket_expr.label("b"), func.avg(MetricSampleDB.value))
+           .filter(MetricSampleDB.timestamp >= start))
+    if node_metric_id:
+        q = q.filter(MetricSampleDB.node_metric_id == node_metric_id)
+    rows = q.group_by(MetricSampleDB.node_metric_id, "b").order_by("b").all()
+
+    series = {}
+    for mid, b, avg in rows:
+        series.setdefault(mid, []).append([round(b * bucket, 0), round(avg, 3)])
+    return {"hours": hours, "bucket_seconds": bucket, "series": series}
 
 @router.get("/current")
 async def get_all_current_metrics(request: Request):

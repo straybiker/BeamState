@@ -7,34 +7,39 @@ import asyncio
 from typing import Optional, Any
 from storage import storage
 from models import NodeDB, NodeMetricDB
-from notifications import PushoverClient
 
 logger = logging.getLogger("BeamState.MetricProcessor")
 
+LEVEL_RANK = {None: 0, "WARNING": 1, "CRITICAL": 2}
+
+
 class MetricProcessor:
-    def __init__(self, pushover: PushoverClient):
-        self.pushover = pushover
+    """
+    Turns raw metric samples into rates, alert levels and notifications.
+
+    Alert state is evaluated independently of notification channels so the
+    dashboard shows DEGRADED even when no channel is configured.
+    """
+
+    def __init__(self, notifier):
+        self.notifier = notifier
         self.previous_values = {} # node_metric_id -> {'value': val, 'timestamp': ts}
-        
-        # Concurrency lock for file operations
+
+        # Concurrency lock for alert state changes
         self.state_lock = asyncio.Lock()
-        
+
         # Notification cooldown - prevent sending same alert within 60s
         self.notification_cooldown = {}  # metric_id -> last_notification_timestamp
         self.COOLDOWN_SECONDS = 60
-        
-        # Load persistence state
-        # Use absolute path relative to this file to ensure consistency across processes
+
+        # Consecutive breach tracking: metric_id -> {'level': candidate, 'count': n}
+        self.breach_counts = {}
+
+        # Persisted alert levels: metric_id -> "WARNING" | "CRITICAL"
         base_dir = pathlib.Path(__file__).parent
-        self.state_file = base_dir / "data" / "alert_states.json"
-        
-        # Ensure directory exists
+        self.state_file = pathlib.Path(os.getenv("ALERT_STATE_FILE", base_dir / "data" / "alert_states.json"))
         os.makedirs(self.state_file.parent, exist_ok=True)
-        
         self.alert_states = self._load_alert_states()
-        
-        # Force save to verify file creation
-        self._save_alert_states()
 
     def _load_alert_states(self):
         try:
@@ -47,37 +52,39 @@ class MetricProcessor:
 
     def _save_alert_states(self):
         try:
-            # Ensure directory exists (should exist since 'data' is standard)
             with open(self.state_file, 'w') as f:
                 json.dump(self.alert_states, f)
         except Exception as e:
             logger.error(f"Failed to save alert states: {e}")
 
-    def get_node_alert_status(self, node: NodeDB) -> tuple[str, Optional[str]]:
-        """
-        Calculates the aggregated status for a node based on active metric alerts.
-        Returns: (status, offending_metric_id)
-        Status: 'DOWN' (Critical), 'PENDING' (Warning), or 'UP' (Normal)
-        """
-        status = "UP"
-        offending_metric_id = None
-        
-        if not node.node_metrics:
-            return status, None
+    def clear_node(self, node: NodeDB):
+        """Drop alert state for all metrics of a node (pause, delete)."""
+        changed = False
+        for metric in node.node_metrics or []:
+            if metric.id in self.alert_states:
+                self.alert_states.pop(metric.id, None)
+                changed = True
+            self.breach_counts.pop(metric.id, None)
+        if changed:
+            self._save_alert_states()
 
-        # Access persisted alerts directly from memory
-        for metric in node.node_metrics:
+    def get_node_alert_status(self, node: NodeDB) -> tuple[Optional[str], Optional[str]]:
+        """
+        Highest active metric alert level for a node.
+        Returns: (level, offending_metric_id) with level in CRITICAL, WARNING or None.
+        """
+        level = None
+        offending_metric_id = None
+
+        for metric in node.node_metrics or []:
             alert_level = self.alert_states.get(metric.id)
             if alert_level == "CRITICAL":
-                # Critical takes precedence immediately
-                return "DOWN", metric.id
-            elif alert_level == "WARNING":
-                # Warning is set, but continue checking for Critical
-                status = "PENDING"
-                if offending_metric_id is None:
-                    offending_metric_id = metric.id
-                
-        return status, offending_metric_id
+                return "CRITICAL", metric.id
+            if alert_level == "WARNING" and level is None:
+                level = "WARNING"
+                offending_metric_id = metric.id
+
+        return level, offending_metric_id
 
     async def process_metric(self, node: NodeDB, node_metric: NodeMetricDB, value: Any) -> Optional[dict]:
         """
@@ -93,15 +100,12 @@ class MetricProcessor:
         # 1. Calculate Rate (if Counter)
         processed_value = value
         rate = None
-        
-        # Determine if we should treat as float/int
+
         try:
-             float_val = float(value)
-             processed_value = float_val
-        except Exception as e:
-             # Keep as string/original if float conversion fails
-             # logger.debug(f"Float conversion failed for {value}: {e}")
-             pass
+            processed_value = float(value)
+        except Exception:
+            # Keep as string/original if float conversion fails
+            pass
 
         if metric_type == 'counter':
             rate = self._calculate_rate(node_metric_id, value, now, unit)
@@ -113,30 +117,69 @@ class MetricProcessor:
         # 2. Check Thresholds & Alert (use processed_value which is rate for counters, or float for gauges)
         await self._check_thresholds(node, node_metric, processed_value)
 
-        # 3. Persist to Storage
+        # 3. Persist to Storage (InfluxDB when enabled, plus short-term SQLite history)
         if processed_value is not None:
-             # Adjust unit if rate
-             final_unit = unit
-             if metric_type == 'counter' and unit == 'bytes':
-                 final_unit = 'bps'
-             
-             await storage.write_snmp_metric(
-                 node_name=node.name,
-                 ip=node.ip,
-                 group_name=node.group.name if node.group else "global",
-                 metric_name=metric_def.name,
-                 value=processed_value,
-                 unit=final_unit,
-                 interface=node_metric.interface_name,
-                 metric_type=metric_type
-             )
-             
+            if isinstance(processed_value, (int, float)):
+                await asyncio.to_thread(self._store_sample, node_metric_id, now, float(processed_value))
+            final_unit = unit
+            if metric_type == 'counter' and unit == 'bytes':
+                final_unit = 'bps'
+
+            await storage.write_snmp_metric(
+                node_name=node.name,
+                ip=node.ip,
+                group_name=node.group.name if node.group else "global",
+                metric_name=metric_def.name,
+                value=processed_value,
+                unit=final_unit,
+                interface=node_metric.interface_name,
+                metric_type=metric_type
+            )
+
         return {
             "value": value,  # Raw value - frontend will format based on unit
             "rate": rate,
             "timestamp": now,
-            "processed_value": processed_value  # Used for alerting (rate for counters)
+            "processed_value": processed_value,  # Used for alerting (rate for counters)
+            "alert_level": self.alert_states.get(node_metric_id)
         }
+
+    @staticmethod
+    def _store_sample(node_metric_id: str, ts: float, value: float):
+        """Append one sample to metric_samples (runs in a worker thread)."""
+        try:
+            from database import SessionLocal
+            from models import MetricSampleDB
+            db = SessionLocal()
+            try:
+                db.add(MetricSampleDB(node_metric_id=node_metric_id, timestamp=ts, value=value))
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.debug(f"Could not store metric sample: {e}")
+
+    @staticmethod
+    def prune_samples(retention_days: int) -> int:
+        """Delete samples older than retention_days. Returns rows removed."""
+        if not retention_days or retention_days <= 0:
+            return 0
+        try:
+            from database import SessionLocal
+            from models import MetricSampleDB
+            cutoff = time.time() - retention_days * 86400
+            db = SessionLocal()
+            try:
+                removed = db.query(MetricSampleDB).filter(MetricSampleDB.timestamp < cutoff).delete()
+                db.commit()
+            finally:
+                db.close()
+            if removed:
+                logger.info(f"Pruned {removed} metric samples older than {retention_days} days")
+            return removed
+        except Exception as e:
+            logger.error(f"Failed to prune metric samples: {e}")
+            return 0
 
     def _calculate_rate(self, node_metric_id: str, current_value: Any, now: float, unit: str) -> Optional[float]:
         try:
@@ -145,8 +188,7 @@ class MetricProcessor:
             return None
 
         prev = self.previous_values.get(node_metric_id)
-        
-        # Update previous value store
+
         self.previous_values[node_metric_id] = {
             "value": cur_val,
             "timestamp": now
@@ -158,7 +200,7 @@ class MetricProcessor:
         try:
             prev_val = float(prev['value'])
             time_delta = now - prev['timestamp']
-            
+
             if time_delta > 0:
                 val_delta = cur_val - prev_val
                 # Handle Wrap-around or Reset (ignore negative delta)
@@ -169,137 +211,140 @@ class MetricProcessor:
                     return rate
         except Exception:
             pass
-            
+
+        return None
+
+    @staticmethod
+    def _raw_level(value: float, condition: str, warning: Optional[float], critical: Optional[float]) -> Optional[str]:
+        """Alert level a single sample maps to, before hysteresis and sample counting."""
+        if critical is not None:
+            if condition == 'gt' and value >= critical:
+                return "CRITICAL"
+            if condition == 'lt' and value <= critical:
+                return "CRITICAL"
+        if warning is not None:
+            if condition == 'gt' and value >= warning:
+                return "WARNING"
+            if condition == 'lt' and value <= warning:
+                return "WARNING"
         return None
 
     async def _check_thresholds(self, node: NodeDB, node_metric: NodeMetricDB, value: float):
         """Check values against warning/critical thresholds and trigger alerts on state change"""
-        
-        # Ensure we have a numeric value
+
         if not isinstance(value, (int, float)):
             return
 
-        # Suppress numeric alerts if node is paused
-        if not node.enabled:
+        # Paused node or paused group: clear any active alert and stop evaluating
+        # (None means "not set", which counts as enabled)
+        group_paused = node.group is not None and node.group.enabled is False
+        if node.enabled is False or group_paused:
             async with self.state_lock:
-                 # Clear alert state if paused to avoid sticking
-                 # We need to reload to safely remove if present in disk
-                 self.alert_states = self._load_alert_states()
-                 if node_metric.id in self.alert_states:
-                     self.alert_states.pop(node_metric.id, None)
-                     self._save_alert_states()
-            return
-
-        # Check global Pushover Enabled setting
-        pushover_config = storage.config.get("pushover", {})
-        if not pushover_config.get("enabled", False):
+                if node_metric.id in self.alert_states:
+                    self.alert_states.pop(node_metric.id, None)
+                    self._save_alert_states()
+                self.breach_counts.pop(node_metric.id, None)
             return
 
         warning = node_metric.warning_threshold
         critical = node_metric.critical_threshold
-        
-        # Determine condition (default to 'gt' if missing for backward compatibility)
         condition = getattr(node_metric, 'alert_condition', 'gt') or 'gt'
-        
-        # If no thresholds set, return
+        min_samples = max(1, int(getattr(node_metric, 'alert_min_samples', 1) or 1))
+
         if warning is None and critical is None:
             return
-            
-        current_alert_level = None
-        
-        # Determine strict level based on thresholds
-        # Critical Check
-        if critical is not None:
-            if condition == 'gt' and value >= critical:
-                current_alert_level = "CRITICAL"
-            elif condition == 'lt' and value <= critical:
-                 current_alert_level = "CRITICAL"
 
-        # Warning Check (only if not critical)
-        if current_alert_level is None and warning is not None:
-            if condition == 'gt' and value >= warning:
-                 current_alert_level = "WARNING"
-            elif condition == 'lt' and value <= warning:
-                 current_alert_level = "WARNING"
+        current_alert_level = self._raw_level(value, condition, warning, critical)
+        metric_name = node_metric.metric_definition.name
 
-        # State Handling & Hysteresis
-        # CRITICAL: Use lock to prevent concurrency race conditions on the JSON file
         async with self.state_lock:
-            # Reload to ensure sync across processes
-            self.alert_states = self._load_alert_states()
             prev_alert_level = self.alert_states.get(node_metric.id)
-            
-            # Debug: trace what we loaded
-            logger.debug(f"ALERT_CHECK: {node.name}-{node_metric.metric_definition.name} id={node_metric.id} | prev={prev_alert_level} current={current_alert_level}")
-            
-            # Apply Hysteresis to prevent flapping
-            HYSTERESIS_FACTOR = 0.05 # 5% buffer
-            
-            if prev_alert_level == "CRITICAL" and current_alert_level != "CRITICAL":
-                # Trying to drop from Critical. Check buffer.
-                # If condition is > (High Value Bad), we need to be safely BELOW critical
-                if condition == 'gt' and value > (critical * (1.0 - HYSTERESIS_FACTOR)):
-                    current_alert_level = "CRITICAL" # Hold Critical
-                # If condition is < (Low Value Bad), we need to be safely ABOVE critical
-                elif condition == 'lt' and value < (critical * (1.0 + HYSTERESIS_FACTOR)):
-                    current_alert_level = "CRITICAL" # Hold Critical
-                    
-            elif prev_alert_level == "WARNING" and current_alert_level is None:
-                 # Trying to drop from Warning to Normal. Check buffer.
-                 if condition == 'gt' and value > (warning * (1.0 - HYSTERESIS_FACTOR)):
-                    current_alert_level = "WARNING" # Hold Warning
-                 elif condition == 'lt' and value < (warning * (1.0 + HYSTERESIS_FACTOR)):
-                    current_alert_level = "WARNING" # Hold Warning
 
-            
-            # If state unchanged, do nothing (suppress duplicates)
-            if current_alert_level == prev_alert_level:
-                logger.debug(f"ALERT_SUPPRESSED: {node.name}-{node_metric.metric_definition.name} | {prev_alert_level} == {current_alert_level}")
-                return
-                
-            # Update state AND SAVE
-            self.alert_states[node_metric.id] = current_alert_level
-            self._save_alert_states()
-            
-            # Debug trace
-            logger.info(f"ALERT_STATE_CHANGE: {node.name}-{node_metric.metric_definition.name} | {prev_alert_level} -> {current_alert_level} | value={value}")
-            
-            # Prepare and Send Notification (INSIDE lock for atomicity)
-            cond_symbol = ">=" if condition == 'gt' else "<="
-            
-            if current_alert_level:
-                # ALERT (Warning or Critical)
-                priority = 1 if current_alert_level == "CRITICAL" else 0
-                trigger_val = critical if current_alert_level == "CRITICAL" else warning
-                
-                title = f"BeamState {current_alert_level}: {node.name} - {node_metric.metric_definition.name}"
-                message = f"{node_metric.metric_definition.name} is {value:.2f} {node_metric.metric_definition.unit or ''} ({cond_symbol} {trigger_val})"
-                
-                # Check cooldown to prevent duplicate notifications
-                now = time.time()
-                last_sent = self.notification_cooldown.get(node_metric.id, 0)
-                if now - last_sent < self.COOLDOWN_SECONDS:
-                    logger.debug(f"NOTIFICATION_COOLDOWN: {node.name}-{node_metric.metric_definition.name} | suppressed (last sent {now - last_sent:.1f}s ago)")
+            logger.debug(f"ALERT_CHECK: {node.name}-{metric_name} id={node_metric.id} | prev={prev_alert_level} current={current_alert_level}")
+
+            # Hysteresis: hold a level until the value is clearly back on the safe side
+            HYSTERESIS_FACTOR = 0.05 # 5% buffer
+
+            if prev_alert_level == "CRITICAL" and current_alert_level != "CRITICAL":
+                if condition == 'gt' and value > (critical * (1.0 - HYSTERESIS_FACTOR)):
+                    current_alert_level = "CRITICAL"
+                elif condition == 'lt' and value < (critical * (1.0 + HYSTERESIS_FACTOR)):
+                    current_alert_level = "CRITICAL"
+
+            elif prev_alert_level == "WARNING" and current_alert_level is None:
+                if condition == 'gt' and value > (warning * (1.0 - HYSTERESIS_FACTOR)):
+                    current_alert_level = "WARNING"
+                elif condition == 'lt' and value < (warning * (1.0 + HYSTERESIS_FACTOR)):
+                    current_alert_level = "WARNING"
+
+            # Escalation needs min_samples consecutive samples at the candidate level.
+            # De-escalation and recovery are immediate (hysteresis already applies).
+            if LEVEL_RANK[current_alert_level] > LEVEL_RANK[prev_alert_level]:
+                tracker = self.breach_counts.get(node_metric.id)
+                if tracker and tracker["level"] == current_alert_level:
+                    tracker["count"] += 1
+                else:
+                    tracker = {"level": current_alert_level, "count": 1}
+                    self.breach_counts[node_metric.id] = tracker
+
+                if tracker["count"] < min_samples:
+                    logger.info(f"ALERT_PENDING: {node.name}-{metric_name} | {current_alert_level} sample {tracker['count']}/{min_samples} (value={value})")
                     return
-                
+            else:
+                self.breach_counts.pop(node_metric.id, None)
+
+            if current_alert_level == prev_alert_level:
+                logger.debug(f"ALERT_SUPPRESSED: {node.name}-{metric_name} | {prev_alert_level} == {current_alert_level}")
+                return
+
+            # State change: persist, then notify
+            if current_alert_level is None:
+                self.alert_states.pop(node_metric.id, None)
+            else:
+                self.alert_states[node_metric.id] = current_alert_level
+            self._save_alert_states()
+            self.breach_counts.pop(node_metric.id, None)
+
+            logger.info(f"ALERT_STATE_CHANGE: {node.name}-{metric_name} | {prev_alert_level} -> {current_alert_level} | value={value}")
+
+            cond_symbol = ">=" if condition == 'gt' else "<="
+            unit = node_metric.metric_definition.unit or ''
+            now = time.time()
+            last_sent = self.notification_cooldown.get(node_metric.id, 0)
+            context = {
+                "node": node.name,
+                "ip": node.ip,
+                "group": node.group.name if node.group else None,
+                "metric": metric_name,
+                "value": value,
+                "unit": unit,
+                "level": current_alert_level,
+            }
+
+            if current_alert_level:
+                trigger_val = critical if current_alert_level == "CRITICAL" else warning
+                title = f"BeamState {current_alert_level}: {node.name} - {metric_name}"
+                message = f"{metric_name} is {value:.2f} {unit} ({cond_symbol} {trigger_val})"
+
+                if now - last_sent < self.COOLDOWN_SECONDS:
+                    logger.debug(f"NOTIFICATION_COOLDOWN: {node.name}-{metric_name} | suppressed (last sent {now - last_sent:.1f}s ago)")
+                    return
+
                 node_prio = node.notification_priority if node.notification_priority is not None else 0
                 final_priority = node_prio
                 if current_alert_level == "CRITICAL" and final_priority < 1:
                     final_priority = 1
-                
-                await self.pushover.send_notification(title, message, final_priority)
+
+                event = "metric_critical" if current_alert_level == "CRITICAL" else "metric_warning"
+                await self.notifier.send(title, message, final_priority, event=event, **context)
                 self.notification_cooldown[node_metric.id] = now
-                
+
             elif prev_alert_level is not None:
-                # RESOLVED (Was Alerting, now Normal)
-                # Check cooldown for resolved notifications too
-                now = time.time()
-                last_sent = self.notification_cooldown.get(node_metric.id, 0)
                 if now - last_sent < self.COOLDOWN_SECONDS:
-                    logger.info(f"NOTIFICATION_COOLDOWN: {node.name}-{node_metric.metric_definition.name} RESOLVED | suppressed")
+                    logger.info(f"NOTIFICATION_COOLDOWN: {node.name}-{metric_name} RESOLVED | suppressed")
                     return
-                    
-                title = f"BeamState RESOLVED: {node.name} - {node_metric.metric_definition.name}"
-                message = f"{node_metric.metric_definition.name} returned to normal ({value:.2f} {node_metric.metric_definition.unit or ''})"
-                await self.pushover.send_notification(title, message, priority=0)
+
+                title = f"BeamState RESOLVED: {node.name} - {metric_name}"
+                message = f"{metric_name} returned to normal ({value:.2f} {unit})"
+                await self.notifier.send(title, message, 0, event="metric_resolved", **context)
                 self.notification_cooldown[node_metric.id] = now

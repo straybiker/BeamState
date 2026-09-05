@@ -2,6 +2,21 @@ import React, { useState, useEffect } from 'react';
 import api from '../api';
 import { Activity, Server, Cpu, Thermometer, ArrowDown, ArrowUp, AlertCircle, Network } from 'lucide-react';
 
+/** Tiny inline trend line. points = [[timestamp, value], ...] */
+const Sparkline = ({ points, color = 'stroke-blue-400', width = 96, height = 22 }) => {
+    if (!points || points.length < 2) return <div style={{ width, height }} className="opacity-30 text-[9px] text-slate-600 flex items-end">no history</div>;
+    const values = points.map(p => p[1]);
+    const min = Math.min(...values), max = Math.max(...values);
+    const range = max - min || 1;
+    const step = width / (points.length - 1);
+    const d = values.map((v, i) => `${(i * step).toFixed(1)},${(height - 2 - ((v - min) / range) * (height - 4)).toFixed(1)}`).join(' ');
+    return (
+        <svg width={width} height={height} className="overflow-visible" title={`min ${min.toFixed(1)} · max ${max.toFixed(1)}`}>
+            <polyline points={d} fill="none" strokeWidth="1.5" className={color} strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+    );
+};
+
 const MetricsDashboard = () => {
     const [nodes, setNodes] = useState([]);
     const [definitions, setDefinitions] = useState([]);
@@ -38,15 +53,13 @@ const MetricsDashboard = () => {
                 });
                 setNodes(allNodes);
 
+                // One request for every node's metric configuration
                 const configs = {};
-                await Promise.all(allNodes.map(async (n) => {
-                    try {
-                        const res = await api.get(`/metrics/nodes/${n.id}`);
-                        configs[n.id] = res.data;
-                    } catch (e) {
-                        console.error(`Failed to load config for ${n.name}`, e);
-                    }
-                }));
+                const allMetricsRes = await api.get('/metrics/nodes');
+                allMetricsRes.data.forEach(m => {
+                    if (!configs[m.node_id]) configs[m.node_id] = [];
+                    configs[m.node_id].push(m);
+                });
                 setNodeConfigs(configs);
 
             } catch (e) {
@@ -69,6 +82,22 @@ const MetricsDashboard = () => {
 
         fetchMetrics();
         const interval = setInterval(fetchMetrics, 5000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // Short-term history for sparklines (6 hours, 48 buckets), refreshed every minute
+    const [history, setHistory] = useState({});
+    useEffect(() => {
+        const fetchHistory = async () => {
+            try {
+                const res = await api.get('/metrics/history?hours=6&points=48');
+                setHistory(res.data.series || {});
+            } catch (e) {
+                console.error("Failed to fetch metric history", e);
+            }
+        };
+        fetchHistory();
+        const interval = setInterval(fetchHistory, 60000);
         return () => clearInterval(interval);
     }, []);
 
@@ -108,11 +137,6 @@ const MetricsDashboard = () => {
         if (unit === 'percent') return `${val}%`;
         if (unit === 'celsius') return `${val}°C`;
         return val;
-    };
-
-    const isTrafficMetric = (name) => {
-        const n = name.toLowerCase();
-        return n.includes('bytes') || n.includes('traffic');
     };
 
     return (
@@ -191,17 +215,24 @@ const MetricsDashboard = () => {
                                             const def = definitions.find(d => d.id === m.metric_definition_id);
                                             const data = currentValues[m.id];
                                             const val = data ? data.value : null;
+                                            const level = data ? data.alert_level : null;
                                             let Icon = Activity;
                                             if (def.name.toLowerCase().includes('cpu')) Icon = Cpu;
                                             if (def.name.toLowerCase().includes('temp')) Icon = Thermometer;
+                                            const valueColor = level === 'CRITICAL' ? 'text-red-400' : level === 'WARNING' ? 'text-amber-300' : 'text-white';
+                                            const boxBorder = level === 'CRITICAL' ? 'border-red-500/40' : level === 'WARNING' ? 'border-amber-500/40' : 'border-slate-700/50';
 
                                             return (
-                                                <div key={m.id} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
+                                                <div key={m.id} className={`bg-slate-900/50 p-3 rounded-lg border ${boxBorder}`} title={level ? `${level} threshold breached` : ''}>
                                                     <div className="flex items-center text-slate-400 text-xs mb-1">
                                                         <Icon size={12} className="mr-1" /> {def.name}
+                                                        {level && <AlertCircle size={12} className={`ml-auto ${valueColor}`} />}
                                                     </div>
-                                                    <div className="text-xl font-mono text-white">
+                                                    <div className={`text-xl font-mono ${valueColor}`}>
                                                         {formatValue(val, def.metric_type, def.unit)}
+                                                    </div>
+                                                    <div className="mt-1">
+                                                        <Sparkline points={history[m.id]} color={level === 'CRITICAL' ? 'stroke-red-400' : level === 'WARNING' ? 'stroke-amber-300' : 'stroke-slate-400'} />
                                                     </div>
                                                 </div>
                                             );
@@ -240,12 +271,14 @@ const MetricsDashboard = () => {
                                                                         <ArrowDown size={10} className="mr-1" /> In
                                                                     </div>
                                                                     <div className="text-base font-mono text-white leading-none">{formatBits(rateIn)}</div>
+                                                                    {iface.trafficIn && <Sparkline points={history[iface.trafficIn.id]} color="stroke-blue-400" width={80} height={18} />}
                                                                 </div>
-                                                                <div className="space-y-1 text-right">
+                                                                <div className="space-y-1 text-right flex flex-col items-end">
                                                                     <div className="text-[10px] uppercase text-slate-500 font-bold flex items-center justify-end">
                                                                         Out <ArrowUp size={10} className="ml-1" />
                                                                     </div>
                                                                     <div className="text-base font-mono text-white leading-none">{formatBits(rateOut)}</div>
+                                                                    {iface.trafficOut && <Sparkline points={history[iface.trafficOut.id]} color="stroke-purple-400" width={80} height={18} />}
                                                                 </div>
                                                             </div>
                                                         )}

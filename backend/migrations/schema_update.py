@@ -1,12 +1,9 @@
 import sqlite3
 import logging
 import os
+from database import DB_PATH
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BeamState.Migrations")
-
-DB_PATH = "data/beamstate.db"
 
 def run_migrations():
     """Run database migrations to update schema"""

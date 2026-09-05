@@ -113,6 +113,7 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                 enabled: true,
                 alert_enabled: true, // Legacy field, kept for schema but not used
                 alert_condition: 'gt', // Default: Above
+                alert_min_samples: 2,  // Two consecutive breaches before alerting
                 warning_threshold: null,
                 critical_threshold: null,
                 ...updates
@@ -145,6 +146,7 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                 enabled: true,
                 alert_enabled: true,
                 alert_condition: 'gt',
+                alert_min_samples: 2,
                 warning_threshold: null,
                 critical_threshold: null
             });
@@ -165,6 +167,7 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                 enabled: true,
                 alert_enabled: true, // Always true or ignored by backend logic now
                 alert_condition: c.alert_condition || 'gt',
+                alert_min_samples: c.alert_min_samples || 1,
                 warning_threshold: c.warning_threshold,
                 critical_threshold: c.critical_threshold
             }));
@@ -382,6 +385,15 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                                                                                                             placeholder="None"
                                                                                                         />
                                                                                                     </div>
+                                                                                                    <div title="Consecutive samples over the threshold before an alert raises">
+                                                                                                        <label className="text-[10px] text-slate-500 block font-medium">Samples</label>
+                                                                                                        <input
+                                                                                                            type="number" min="1" max="60"
+                                                                                                            value={config?.alert_min_samples || 1}
+                                                                                                            onChange={(e) => handleUpdateMetric(def.id, iface.index, iface.name, { alert_min_samples: Math.max(1, parseInt(e.target.value) || 1) })}
+                                                                                                            className="w-14 h-[26px] bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white focus:border-blue-500 outline-none"
+                                                                                                        />
+                                                                                                    </div>
                                                                                                 </div>
                                                                                             </div>
                                                                                         )}
@@ -507,6 +519,15 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                                                                 onChange={(e) => handleUpdateMetric(def.id, configEntry.interface_index, null, { critical_threshold: e.target.value === '' ? null : parseFloat(e.target.value) })}
                                                                 className="w-20 h-[26px] bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:border-red-500 outline-none"
                                                                 placeholder="None"
+                                                            />
+                                                        </div>
+                                                        <div className="flex flex-col gap-1" title="Consecutive samples over the threshold before an alert raises">
+                                                            <span className="text-[10px] text-slate-500 font-medium">Samples</span>
+                                                            <input
+                                                                type="number" min="1" max="60"
+                                                                value={configEntry.alert_min_samples || 1}
+                                                                onChange={(e) => handleUpdateMetric(def.id, configEntry.interface_index, null, { alert_min_samples: Math.max(1, parseInt(e.target.value) || 1) })}
+                                                                className="w-14 h-[26px] bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:border-purple-500 outline-none"
                                                             />
                                                         </div>
                                                     </div>

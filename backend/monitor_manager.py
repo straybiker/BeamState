@@ -2,79 +2,91 @@ import asyncio
 import logging
 import time
 from typing import Dict, List, Optional
+import httpx
 from database import SessionLocal
 from models import NodeDB, GroupDB
 from storage import storage
 from monitors import PingMonitor, SNMPMonitor, MonitorResult
 from monitors.snmp_data_collector import SNMPDataCollector
-from notifications import PushoverClient
+from notifications import Notifier
 from metrics_processor import MetricProcessor
+from broadcast import status_stream
 from models import MetricDefinitionDB, NodeMetricDB
 from trace_manager import trace_manager, TraceEvent
 
 logger = logging.getLogger("BeamState.MonitorManager")
 
+# Node status vocabulary
+#   UP        reachable, no metric alert
+#   DEGRADED  reachable, at least one metric in WARNING or CRITICAL
+#   PENDING   a reachability check failed, retrying
+#   DOWN      retries exhausted
+#   PAUSED    monitoring disabled for node or group
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = int(max(0, seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
 class MonitorManager:
     def __init__(self):
         self.running = False
-        self.last_ping_time: Dict[int, float] = {} # node_id -> timestamp
-        self.latest_results: Dict[int, dict] = {} # node_id -> {status, latency, packet_loss, timestamp}
-        self.node_states: Dict[int, dict] = {} # node_id -> {status, failure_count, first_failure_time}
-        
+        self.last_ping_time: Dict[str, float] = {} # node_id -> timestamp
+        self.latest_results: Dict[str, dict] = {} # node_id -> {status, latency, packet_loss, timestamp}
+        self.node_states: Dict[str, dict] = {} # node_id -> {status, failure_count, first_failure_time, ...}
+
         # Concurrency limit for Windows (SelectorEventLoop 64 FD limit)
         self.semaphore = asyncio.Semaphore(32)
-        
+
         # Initialize monitors
         self.ping_monitor = PingMonitor()
         self.snmp_monitor = SNMPMonitor()
         self.snmp_collector = SNMPDataCollector()
-        
-        # Configure Pushover
-        pushover_conf = storage.config.get("pushover", {})
-        self.pushover = PushoverClient(
-            token=pushover_conf.get("token"),
-            user_key=pushover_conf.get("user_key")
-        )
-        self.metric_processor = MetricProcessor(self.pushover)
-        
+
+        # Notifications: one facade for every channel
+        self.notifier = Notifier(storage)
+        self.metric_processor = MetricProcessor(self.notifier)
+
         # Inject processor into collector
         self.snmp_collector.set_processor(self.metric_processor)
-        
+
         # Throttling state
         self.alert_history: List[float] = [] # timestamps of recent alerts
         self.last_storm_alert_time = 0
 
+        # Background tasks
+        self._heartbeat_task: Optional[asyncio.Task] = None
 
-
-
-    def remove_node(self, node_id: int):
-        if node_id in self.latest_results:
-            del self.latest_results[node_id]
-        if node_id in self.last_ping_time:
-            del self.last_ping_time[node_id]
-        # Clear failure tracking
+    def remove_node(self, node_id: str):
+        self.latest_results.pop(node_id, None)
+        self.last_ping_time.pop(node_id, None)
         self.node_states.pop(node_id, None)
         logger.info(f"Removed node {node_id} from monitor cache")
 
-    def get_node_state(self, node_id: int) -> dict:
+    def get_node_state(self, node_id: str) -> dict:
         if node_id not in self.node_states:
             self.node_states[node_id] = {
                 "status": "UP",
                 "failure_count": 0,
-                "first_failure_time": 0
+                "first_failure_time": 0,
+                "down_since": 0,
+                "down_alert_sent": False,
             }
         return self.node_states[node_id]
-    
+
     def trigger_immediate_check(self, node_id: str):
         """Trigger an immediate check for a specific node (e.g., when unpausing)"""
-        if node_id in self.last_ping_time:
-            # Reset the last ping time to 0 to force immediate check on next loop iteration
-            self.last_ping_time[node_id] = 0
-            logger.info(f"Triggered immediate check for node {node_id}")
-        else:
-            # If not in cache, add it with 0 so it runs immediately
-            self.last_ping_time[node_id] = 0
-            logger.info(f"Node {node_id} not in ping cache, added for immediate check")
+        # Reset the last ping time to 0 to force immediate check on next loop iteration
+        self.last_ping_time[node_id] = 0
+        logger.info(f"Triggered immediate check for node {node_id}")
+
     def set_paused(self, node: NodeDB):
         """Immediately force a node's status to PAUSED in the cache"""
         now = time.time()
@@ -88,55 +100,103 @@ class MonitorManager:
             "packet_loss": 0,
             "timestamp": now,
             "monitor_ping": False,
-            "monitor_snmp": False
+            "monitor_snmp": False,
+            "failure_count": 0,
+            "max_retries": None,
         }
         # Also clear any failure state so it doesn't resume as PENDING/DOWN later
-        if node.id in self.node_states:
-            self.node_states[node.id]["status"] = "PAUSED"
-            self.node_states[node.id]["failure_count"] = 0
-            
+        state = self.get_node_state(node.id)
+        state["status"] = "PAUSED"
+        state["failure_count"] = 0
+        state["down_alert_sent"] = False
+        try:
+            self.metric_processor.clear_node(node)
+        except Exception as e:
+            logger.debug(f"Could not clear metric alerts for paused node {node.name}: {e}")
+
         logger.info(f"Node {node.name} status forced to PAUSED")
+
+    # ------------------------------------------------------------------ #
+    # Dependency helpers
+    # ------------------------------------------------------------------ #
+
+    def _down_ancestor(self, node: NodeDB) -> Optional[NodeDB]:
+        """Return the nearest ancestor currently DOWN, or None."""
+        seen = set()
+        parent = node.parent
+        while parent is not None and parent.id not in seen:
+            seen.add(parent.id)
+            if self.node_states.get(parent.id, {}).get("status") == "DOWN":
+                return parent
+            parent = parent.parent
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Processing
+    # ------------------------------------------------------------------ #
 
     async def process_node_with_limit(self, node: NodeDB):
         """Process a node with semaphore to limit concurrent sockets"""
         async with self.semaphore:
             await self.process_node(node)
 
+    def _emit(self, node: NodeDB, old: str, new: str, reason: str):
+        asyncio.create_task(trace_manager.emit(TraceEvent(
+            timestamp=time.time(),
+            node_id=node.id,
+            node_name=node.name,
+            ip=node.ip,
+            group_name=node.group.name if node.group else "Unknown",
+            old_status=old,
+            new_status=new,
+            reason=reason
+        )))
+
+    def _metric_reason(self, node: NodeDB, level: str, offending_metric_id: Optional[str]) -> str:
+        reason = f"Metric alert: {level}"
+        if not offending_metric_id:
+            return reason
+        metric = next((m for m in node.node_metrics if m.id == offending_metric_id), None)
+        if not metric:
+            return reason
+        current_data = self.snmp_collector.current_values.get(offending_metric_id)
+        if not current_data:
+            return f"{metric.metric_definition.name}: {level}"
+        val = current_data.get("processed_value")
+        val_str = f"{val:.2f}" if isinstance(val, (int, float)) else str(val)
+        unit = metric.metric_definition.unit or ""
+        threshold = metric.critical_threshold if level == "CRITICAL" else metric.warning_threshold
+        cond = getattr(metric, 'alert_condition', 'gt') or 'gt'
+        symbol = ">" if cond == 'gt' else "<"
+        return f"{metric.metric_definition.name}: {val_str}{unit} ({symbol} {threshold}, {level})"
+
     async def process_node(self, node: NodeDB):
         """Process a single node with configured monitoring protocols"""
         now = time.time()
         last = self.last_ping_time.get(node.id, 0)
-        
-        # Check if node has a group
+
         if node.group is None:
             logger.warning(f"Node {node.name} ({node.id}) is an orphan (no group). Skipping.")
             return
-        
-        # Get node settings
+
+        # Effective settings (node override, else group default)
         interval = node.interval if node.interval is not None else node.group.interval
         packet_count = node.packet_count if node.packet_count is not None else node.group.packet_count
         max_retries = node.max_retries if node.max_retries is not None else node.group.max_retries
-        
-        # Get current state
+
         state = self.get_node_state(node.id)
         current_status = state["status"]
-        
-        # Determine effective interval based on status
-        effective_interval = interval
-        if current_status == "PENDING":
-             # Retry interval is 1/3 of heartbeat
-             effective_interval = interval / 3
 
-        # Determine if due
+        # Retry faster while PENDING
+        effective_interval = interval / 3 if current_status == "PENDING" else interval
+
         if now - last < effective_interval:
             return
-        
+
         self.last_ping_time[node.id] = now
 
-        # Skip monitoring if node or group is disabled (PAUSED)
-        # BUT write a PAUSED record to storage to ensure alerts clear (status_code=1)
+        # Paused node or group: publish PAUSED and clear stale alerts in storage
         if not node.enabled or not node.group.enabled:
-            # Update cache
             self.latest_results[node.id] = {
                 "node_id": node.id,
                 "node_name": node.name,
@@ -147,10 +207,15 @@ class MonitorManager:
                 "packet_loss": 0,
                 "timestamp": now,
                 "monitor_ping": False,
-                "monitor_snmp": False
+                "monitor_snmp": False,
+                "failure_count": 0,
+                "max_retries": max_retries,
             }
-            # Write 'PAUSED' to storage to clear any stale DOWN alerts
-            # We use a dummy protocol 'system' or just 'icmp' to ensure it appears in the same query
+            if current_status != "PAUSED":
+                state["status"] = "PAUSED"
+                state["failure_count"] = 0
+                state["down_alert_sent"] = False
+                status_stream.publish({"type": "node", "data": self.latest_results[node.id]})
             await storage.write_monitor_result(
                 node_name=node.name,
                 ip=node.ip,
@@ -158,153 +223,104 @@ class MonitorManager:
                 protocol="icmp", # Use icmp so it shows up in main status query
                 latency=0.0,
                 status="PAUSED",
-                success=True, # Treated as success to be safe
+                success=True,
                 raw_data={}
             )
             return
-        
-        # Determine monitoring configuration
+
         use_ping = node.monitor_ping if node.monitor_ping is not None else node.group.monitor_ping
         use_snmp = node.monitor_snmp if node.monitor_snmp is not None else node.group.monitor_snmp
-        
-        # Get node settings (re-fetch to be safe/clear, though we fetched earlier)
-        # interval/packet_count are already fetched at top of function but we can reuse or just use what we have.
-        # Actually, looking at code above, I already fetched 'interval', 'packet_count', 'max_retries' at lines 68-71.
-        # So I only need to define use_ping and use_snmp.
-        
+
         # Run configured monitors
         monitor_results: List[MonitorResult] = []
-        
+
         if use_ping:
             logger.debug(f"Running PING monitor for {node.name} ({node.ip})")
             ping_result = await self.ping_monitor.check(node.ip, count=packet_count, timeout=5)
             monitor_results.append(ping_result)
-        
+
         if use_snmp:
             logger.debug(f"Running SNMP monitor for {node.name} ({node.ip})")
             community = node.snmp_community or node.group.snmp_community
             port = node.snmp_port or node.group.snmp_port
             snmp_result = await self.snmp_monitor.check(node.ip, community=community, port=port, timeout=5)
             monitor_results.append(snmp_result)
-        
-        # Aggregate results: node is UP only if ALL configured monitors succeed
+
+        # Node is reachable only if ALL configured monitors succeed
         overall_success = all(r.success for r in monitor_results) if monitor_results else False
-        
-        # Calculate average latency from successful ICMP monitors only
+
         successful_latencies = [r.latency_ms for r in monitor_results if r.protocol == "icmp" and r.success and r.latency_ms is not None]
         avg_latency = sum(successful_latencies) / len(successful_latencies) if successful_latencies else None
-        
-        # Determine packet loss (only relevant for PING)
+
         packet_loss = 0.0
         for result in monitor_results:
             if result.protocol == "icmp":
                 packet_loss = result.raw_data.get("packet_loss", 0.0)
                 break
-        
-        # Update state based on aggregated result
+
+        # Process ICMP-derived metrics first so metric alert state is current
+        # when the node status is derived below.
+        for result in monitor_results:
+            if result.protocol == "icmp" and result.success:
+                await self._process_icmp_metrics(node, result)
+            elif result.protocol == "snmp" and result.success:
+                self._check_reboot(node, state, result.raw_data.get("uptime_ticks"), now)
+
         new_status = current_status
-        
+
         if overall_success:
-            # Success (Ping/SNMP reachability OK)
-            new_status = "UP"
-            
-            # Check if metric alerts override status
-            # Check if metric alerts override status
-            metric_status, offending_metric_id = self.metric_processor.get_node_alert_status(node)
-            if metric_status == "DOWN":
-                new_status = "DOWN"
-            elif metric_status == "PENDING":
-                 new_status = "PENDING"
-            
+            # Reachable. Metric alerts make it DEGRADED, never DOWN.
+            metric_level, offending_metric_id = self.metric_processor.get_node_alert_status(node)
+            new_status = "DEGRADED" if metric_level else "UP"
+
             if current_status != new_status:
-                logger.info(f"Node {node.name} status changed: {current_status} -> {new_status} (Reachability: OK, Metric Alert: {metric_status})")
-                
-                # Determine detailed reason
-                reason = f"Reachability OK"
-                if metric_status != "UP":
-                    reason = f"Metric alert: {metric_status}"
-                    if offending_metric_id:
-                        metric = next((m for m in node.node_metrics if m.id == offending_metric_id), None)
-                        if metric:
-                            current_data = self.snmp_collector.current_values.get(offending_metric_id)
-                            if current_data:
-                                val = current_data.get("processed_value")
-                                if isinstance(val, (int, float)):
-                                    val_str = f"{val:.2f}"
-                                else:
-                                    val_str = str(val)
-                                    
-                                unit = metric.metric_definition.unit or ""
-                                threshold = metric.critical_threshold if metric_status == "DOWN" else metric.warning_threshold
-                                cond = getattr(metric, 'alert_condition', 'gt') or 'gt'
-                                symbol = ">" if cond == 'gt' else "<"
-                                reason = f"{metric.metric_definition.name}: {val_str}{unit} ({symbol} {threshold})"
-                asyncio.create_task(trace_manager.emit(TraceEvent(
-                    timestamp=time.time(),
-                    node_id=node.id,
-                    node_name=node.name,
-                    ip=node.ip,
-                    group_name=node.group.name,
-                    old_status=current_status,
-                    new_status=new_status,
-                    reason=reason
-                )))
-                
-            state["failure_count"] = 0 # Reset failure count for reachability
+                if metric_level:
+                    reason = self._metric_reason(node, metric_level, offending_metric_id)
+                elif current_status == "DOWN":
+                    reason = f"Reachability restored after {_format_duration(now - state['down_since'])}"
+                elif current_status == "DEGRADED":
+                    reason = "Metrics back within thresholds"
+                else:
+                    reason = "Reachability OK"
+                logger.info(f"Node {node.name} status changed: {current_status} -> {new_status} ({reason})")
+                self._emit(node, current_status, new_status, reason)
+
+                if current_status == "DOWN":
+                    # Capture before the flag is reset below; the task runs later
+                    asyncio.create_task(self._send_recovery_alert(
+                        node, now - state["down_since"], alert_was_sent=state.get("down_alert_sent", False)))
+
+            state["failure_count"] = 0
             state["first_failure_time"] = 0
+            state["down_since"] = 0
+            state["down_alert_sent"] = False
         else:
-            # Failure
-            if current_status == "UP":
-                # Transition to PENDING
+            # Reachability failure
+            if current_status in ("UP", "DEGRADED", "PAUSED"):
                 new_status = "PENDING"
                 state["failure_count"] = 1
-                # Emit trace event for UP -> PENDING
-                asyncio.create_task(trace_manager.emit(TraceEvent(
-                    timestamp=time.time(),
-                    node_id=node.id,
-                    node_name=node.name,
-                    ip=node.ip,
-                    group_name=node.group.name,
-                    old_status=current_status,
-                    new_status=new_status,
-                    reason="Check failed, entering retry state"
-                )))
                 state["first_failure_time"] = now
-                logger.warning(f"Node {node.name} check failed. Entering PENDING state (Retry 1/{max_retries})")
+                self._emit(node, current_status, new_status, "Check failed, entering retry state")
+                logger.warning(f"Node {node.name} check failed. Entering PENDING state (retry 1/{max_retries} scheduled)")
             elif current_status == "PENDING":
                 state["failure_count"] += 1
-                logger.warning(f"Node {node.name} retry failed ({state['failure_count']}/{max_retries})")
+                retry_no = state["failure_count"] - 1
+                logger.warning(f"Node {node.name} retry {retry_no}/{max_retries} failed")
                 if state["failure_count"] > max_retries:
-                    # Transition to DOWN
                     new_status = "DOWN"
+                    state["down_since"] = state["first_failure_time"] or now
                     logger.error(f"Node {node.name} exceeded max retries. Marking DOWN.")
-                    # Emit trace event for PENDING -> DOWN
-                    asyncio.create_task(trace_manager.emit(TraceEvent(
-                        timestamp=time.time(),
-                        node_id=node.id,
-                        node_name=node.name,
-                        ip=node.ip,
-                        group_name=node.group.name,
-                        old_status="PENDING",
-                        new_status="DOWN",
-                        reason=f"Exceeded max retries ({max_retries})"
-                    )))
-                    
-                    # Trigger Notification
+                    self._emit(node, "PENDING", "DOWN", f"Exceeded max retries ({max_retries})")
                     asyncio.create_task(self._send_down_alert(node))
             elif current_status == "DOWN":
-                # Stay DOWN
                 new_status = "DOWN"
-        
-        # Update state
+
         state["status"] = new_status
-        
-        # Log result at DEBUG level (use INFO for warnings/errors)
+
         lat_str = f"{avg_latency:.2f}ms" if avg_latency is not None else "N/A"
         protocols = [r.protocol.upper() for r in monitor_results]
         logger.debug(f"Result for {node.name} ({'/'.join(protocols)}): {new_status}, Latency: {lat_str}, Loss: {packet_loss}%")
-        
-        # Store latest result
+
         self.latest_results[node.id] = {
             "node_id": node.id,
             "node_name": node.name,
@@ -315,17 +331,22 @@ class MonitorManager:
             "packet_loss": packet_loss,
             "timestamp": now,
             "monitor_ping": use_ping,
-            "monitor_snmp": use_snmp
+            "monitor_snmp": use_snmp,
+            "failure_count": state["failure_count"],
+            "max_retries": max_retries,
+            "parent_id": node.parent_id,
+            "uptime_seconds": state.get("uptime_ticks") // 100 if state.get("uptime_ticks") is not None else None,
         }
-        
+        status_stream.publish({"type": "node", "data": self.latest_results[node.id]})
+
         # Write to Storage (log each monitor result separately)
         for result in monitor_results:
-            # Determine status for this specific protocol check
-            # Use Node status if it's PENDING (to show retry state), otherwise purely based on success
             if new_status == "PENDING":
                 record_status = "PENDING"
+            elif result.success:
+                record_status = new_status if new_status in ("UP", "DEGRADED") else "UP"
             else:
-                record_status = "UP" if result.success else "DOWN"
+                record_status = "DOWN"
 
             await storage.write_monitor_result(
                 node_name=node.name,
@@ -337,51 +358,80 @@ class MonitorManager:
                 success=result.success,
                 raw_data=result.raw_data
             )
-            
-            # --- NEW: Process generic generic metrics for alerting (ICMP) ---
-            if result.protocol == "icmp" and result.success:
-                # We need to find the NodeMetricDB entries for this node's ICMP metrics
-                # Since we are in an async method and db session is closed (it was passed in process_node? No, process_node uses DB via run_loop passing it?
-                # Wait, process_node takes 'node' which is attached to a session?
-                # 'node' comes from run_loop -> db.query(). So it is attached.
-                # But be careful about lazy loading if session is closed? 
-                # run_loop keeps session open while awaiting tasks.
-                
-                # We can access node.node_metrics
-                for nm in node.node_metrics:
-                    if not nm.enabled: continue
-                    definition = nm.metric_definition
-                    if not definition: continue
-                    if definition.metric_source != "icmp": continue
-                    
-                    val = None
-                    if definition.name == "ICMP Latency" and result.latency_ms is not None:
-                         val = result.latency_ms
-                    elif definition.name == "ICMP Packet Loss":
-                         val = result.raw_data.get("packet_loss", 0.0)
-                         
-                    if val is not None:
-                         try:
-                             result = await self.metric_processor.process_metric(node, nm, val)
-                             # Store in shared cache for UI access
-                             if result:
-                                 self.snmp_collector.current_values[nm.id] = result
-                         except Exception as ex:
-                             logger.error(f"Error processing ICMP metric {definition.name}: {ex}")
+
+    def _check_reboot(self, node: NodeDB, state: dict, uptime_ticks, now: float):
+        """
+        sysUpTime counts hundredths of a second since the SNMP agent started.
+        A value lower than the previous reading means the device restarted.
+        """
+        if uptime_ticks is None:
+            return
+        try:
+            ticks = int(uptime_ticks)
+        except (TypeError, ValueError):
+            return
+
+        prev = state.get("uptime_ticks")
+        state["uptime_ticks"] = ticks
+        if prev is None or ticks >= prev:
+            return
+
+        # Counter wrap (2^32 ticks, about 497 days) is not a reboot
+        if prev > 2**32 - 24 * 360000:
+            return
+
+        previous_uptime = _format_duration(prev / 100)
+        booted_ago = _format_duration(ticks / 100)
+        reason = f"Device rebooted (uptime was {previous_uptime}, now {booted_ago})"
+        logger.warning(f"Node {node.name}: {reason}")
+        self._emit(node, state["status"], state["status"], reason)
+
+        if self.notifier.storage.config.get("alerting", {}).get("notify_reboot", True):
+            title = f"BeamState Reboot: {node.name}"
+            message = f"{node.name} ({node.ip}) rebooted. Previous uptime {previous_uptime}, up again for {booted_ago}."
+            asyncio.create_task(self.notifier.send(
+                title, message, 0, event="node_reboot",
+                previous_uptime_seconds=prev // 100, **self._node_context(node, state["status"])))
+
+    async def _process_icmp_metrics(self, node: NodeDB, result: MonitorResult):
+        """Feed ICMP latency and packet loss into the generic metric pipeline."""
+        for nm in node.node_metrics:
+            if not nm.enabled:
+                continue
+            definition = nm.metric_definition
+            if not definition or definition.metric_source != "icmp":
+                continue
+
+            val = None
+            if definition.name == "ICMP Latency" and result.latency_ms is not None:
+                val = result.latency_ms
+            elif definition.name == "ICMP Packet Loss":
+                val = result.raw_data.get("packet_loss", 0.0)
+
+            if val is None:
+                continue
+            try:
+                processed = await self.metric_processor.process_metric(node, nm, val)
+                if processed:
+                    self.snmp_collector.current_values[nm.id] = processed
+            except Exception as ex:
+                logger.error(f"Error processing ICMP metric {definition.name}: {ex}")
+
+    # ------------------------------------------------------------------ #
+    # Loops
+    # ------------------------------------------------------------------ #
 
     async def run_loop(self):
         self.running = True
         logger.info("Monitor Loop Started")
-        
-        
-        # Start SNMP Collector
+
         await self.snmp_collector.start()
-        
+        self._heartbeat_task = asyncio.create_task(self.heartbeat_loop())
+
         while self.running:
             db = SessionLocal()
             try:
                 nodes = db.query(NodeDB).all()
-                # Process nodes concurrently
                 tasks = [self.process_node_with_limit(n) for n in nodes]
                 if tasks:
                     await asyncio.gather(*tasks)
@@ -389,13 +439,34 @@ class MonitorManager:
                 logger.error(f"Error in Monitor Loop: {e}")
             finally:
                 db.close()
-            
-            # Sleep to prevent busy loop
+
             await asyncio.sleep(1)
+
+    async def heartbeat_loop(self):
+        """
+        Deadman switch: GET a URL on a fixed interval while the monitor runs.
+        Point it at Healthchecks.io, Uptime Kuma push or a Home Assistant webhook.
+        """
+        while self.running:
+            conf = storage.config.get("heartbeat", {})
+            interval = max(10, int(conf.get("interval", 60) or 60))
+            if conf.get("enabled") and conf.get("url"):
+                try:
+                    async with httpx.AsyncClient() as client:
+                        r = await client.get(conf["url"], timeout=10.0)
+                        if r.status_code >= 300:
+                            logger.warning(f"Heartbeat returned status {r.status_code}")
+                        else:
+                            logger.debug("Heartbeat sent")
+                except Exception as e:
+                    logger.warning(f"Heartbeat failed: {e}")
+            await asyncio.sleep(interval)
 
     def stop(self):
         self.running = False
         self.snmp_collector.stop()
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
         logger.info("Stopping Monitor Loop...")
 
     def get_status(self):
@@ -405,78 +476,80 @@ class MonitorManager:
             "latest_results": list(self.latest_results.values())
         }
 
+    # ------------------------------------------------------------------ #
+    # Notifications
+    # ------------------------------------------------------------------ #
+
+    def _node_context(self, node: NodeDB, status: str) -> dict:
+        return {
+            "node": node.name,
+            "ip": node.ip,
+            "group": node.group.name if node.group else None,
+            "status": status,
+        }
+
     async def _send_down_alert(self, node: NodeDB):
         """Send notification for DOWN node"""
+        state = self.get_node_state(node.id)
         try:
+            if not self.notifier.any_channel_enabled():
+                logger.debug("No notification channel enabled. Skipping alert.")
+                return
+
+            # Dependency: an upstream device is already DOWN, this alert is noise
+            ancestor = self._down_ancestor(node)
+            if ancestor is not None:
+                logger.info(f"Suppressing DOWN alert for {node.name}: parent {ancestor.name} is DOWN")
+                self._emit(node, "DOWN", "DOWN", f"Alert suppressed: parent {ancestor.name} is DOWN")
+                return
+
             pushover_config = storage.config.get("pushover", {})
-            if not pushover_config.get("enabled", False):
-                logger.debug("Pushover disabled in config. Skipping alert.")
-                return
-
-            # Check maintenance mode
-            m_mode = pushover_config.get("maintenance_mode", False)
-            
-            if m_mode:
-                logger.warning(f"Maintenance Mode Active: Suppressing alert for {node.name}")
-                return
-            
-            logger.debug(f"Pushover Config Check: keys={list(pushover_config.keys())}, maintenance_mode={m_mode}")
-
 
             # --- Throttling Logic ---
-            throttling_enabled = pushover_config.get("throttling_enabled", False)
-            if throttling_enabled:
+            if pushover_config.get("throttling_enabled", False):
                 threshold = int(pushover_config.get("alert_threshold", 5))
                 window = int(pushover_config.get("alert_window", 60))
                 now = time.time()
-                
-                # Prune history
+
                 self.alert_history = [t for t in self.alert_history if now - t < window]
-                
                 logger.info(f"Throttling Check: History={len(self.alert_history)}, Threshold={threshold}, Window={window}")
 
-                # Check storm condition
                 if len(self.alert_history) >= threshold:
                     logger.warning(f"Alert storm detected ({len(self.alert_history)} alerts in last {window}s). Suppressing individual alert for {node.name}.")
-                    
-                    # Send General "Outage detected" alert if not sent recently (limit to once per window)
                     if now - self.last_storm_alert_time > window:
                         self.last_storm_alert_time = now
                         title = "⚠️ Global Alert: High failure rate detected"
                         message = f"Alert Storm: {len(self.alert_history)} nodes down within {window}s. Suppressing individual alerts to prevent spam."
-                        priority = 1 # High priority
-                        
-                        # Use keys (already fetched below, so we need to move fetching up or re-fetch)
-                        token = pushover_config.get("token")
-                        user_key = pushover_config.get("user_key")
-                        if token and user_key:
-                            self.pushover.configure(token, user_key)
-                            await self.pushover.send_notification(title, message, priority)
+                        await self.notifier.send(title, message, 1, event="alert_storm", count=len(self.alert_history), window=window)
                     return
-                
-                # Add current to history
+
                 self.alert_history.append(now)
 
-            token = pushover_config.get("token")
-            user_key = pushover_config.get("user_key")
-            
-            if not token or not user_key:
-                logger.warning("Pushover enabled but credentials missing. Skipping alert.")
-                return
-
-            # Configure client
-            self.pushover.configure(token, user_key)
-            
-            # Format message
-            # Use node-specific priority if set, otherwise fall back to global
             global_priority = int(pushover_config.get("priority", 0))
             priority = node.notification_priority if node.notification_priority is not None else global_priority
             template = pushover_config.get("message_template", "Node {name} ({ip}) is DOWN")
-            
+
             message = template.format(name=node.name, ip=node.ip)
             title = f"BeamState Alert: {node.name}"
-            
-            await self.pushover.send_notification(title, message, priority)
-            
+
+            sent = await self.notifier.send(title, message, priority, event="node_down", **self._node_context(node, "DOWN"))
+            state["down_alert_sent"] = bool(sent)
+
         except Exception as e:
             logger.error(f"Failed to trigger alert for {node.name}: {e}")
+
+    async def _send_recovery_alert(self, node: NodeDB, downtime: float, alert_was_sent: bool):
+        """Send notification when a node returns from DOWN to reachable."""
+        try:
+            if not self.notifier.notify_recovery():
+                return
+            if not alert_was_sent:
+                # The DOWN alert was suppressed (parent down, storm, maintenance): stay quiet
+                logger.debug(f"Skipping recovery alert for {node.name}: no DOWN alert was sent")
+                return
+
+            title = f"BeamState Recovered: {node.name}"
+            message = f"Node {node.name} ({node.ip}) is back UP after {_format_duration(downtime)}"
+            await self.notifier.send(title, message, 0, event="node_up", downtime_seconds=int(downtime), **self._node_context(node, "UP"))
+        except Exception as e:
+            logger.error(f"Failed to send recovery alert for {node.name}: {e}")

@@ -1,14 +1,13 @@
 import logging
-import os
 import sqlite3
+from database import DB_PATH
 
 logger = logging.getLogger("BeamState.MigrationV2")
 
 def run_migrations():
     """Run database schema updates for Alert Conditions"""
     try:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'beamstate.db')
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         # Check if alert_condition column exists in node_metrics
