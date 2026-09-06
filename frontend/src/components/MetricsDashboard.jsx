@@ -44,15 +44,6 @@ const MetricsDashboard = () => {
                 const groupRes = await api.get('/config/groups');
                 const groups = groupRes.data;
 
-                const nodeRes = await api.get('/config/nodes');
-                const allNodes = nodeRes.data.filter(n => {
-                    if (n.monitor_snmp === true) return true;
-                    if (n.monitor_snmp === false) return false;
-                    const group = groups.find(g => g.id === n.group_id);
-                    return group ? group.monitor_snmp : false;
-                });
-                setNodes(allNodes);
-
                 // One request for every node's metric configuration
                 const configs = {};
                 const allMetricsRes = await api.get('/metrics/nodes');
@@ -61,6 +52,17 @@ const MetricsDashboard = () => {
                     configs[m.node_id].push(m);
                 });
                 setNodeConfigs(configs);
+
+                // Show SNMP nodes plus any node that has metrics configured (e.g. ICMP latency)
+                const nodeRes = await api.get('/config/nodes');
+                const allNodes = nodeRes.data.filter(n => {
+                    if (configs[n.id]?.length) return true;
+                    if (n.monitor_snmp === true) return true;
+                    if (n.monitor_snmp === false) return false;
+                    const group = groups.find(g => g.id === n.group_id);
+                    return group ? group.monitor_snmp : false;
+                });
+                setNodes(allNodes);
 
             } catch (e) {
                 console.error("Failed to load metadata", e);
@@ -109,6 +111,13 @@ const MetricsDashboard = () => {
         return `${Math.round(bps)} bps`;
     };
 
+    // Numbers are shown with at most 2 decimals; integers stay integers
+    const round2 = (v) => {
+        const n = typeof v === 'number' ? v : parseFloat(v);
+        if (Number.isNaN(n)) return v;
+        return Number(n.toFixed(2)).toString();
+    };
+
     const formatValue = (val, type, unit) => {
         if (val === undefined || val === null) return '-';
         if (unit === 'kbytes') return formatValue(val * 1024, type, 'bytes');
@@ -134,17 +143,18 @@ const MetricsDashboard = () => {
             const statusText = statusMap[val] || 'Unknown';
             return `${statusText} (${val})`;
         }
-        if (unit === 'percent') return `${val}%`;
-        if (unit === 'celsius') return `${val}°C`;
-        return val;
+        if (unit === 'percent') return `${round2(val)}%`;
+        if (unit === 'celsius') return `${round2(val)}°C`;
+        if (unit === 'ms') return `${round2(val)} ms`;
+        return round2(val);
     };
 
     return (
         <div className="space-y-6">
             <header className="flex items-center justify-between mb-8">
                 <div>
-                    <h2 className="text-3xl font-bold text-slate-100">SNMP Dashboard</h2>
-                    <p className="text-slate-400">Real-time SNMP data</p>
+                    <h2 className="text-3xl font-bold text-slate-100">Metrics Dashboard</h2>
+                    <p className="text-slate-400">Real-time SNMP and ICMP metrics</p>
                 </div>
                 <img
                     src="/logo_transparant.png"
