@@ -45,31 +45,71 @@ def read_node_metrics(node_id: str, db: Session = Depends(get_db)):
     """Get all metrics configured for a node"""
     return db.query(NodeMetricDB).filter(NodeMetricDB.node_id == node_id).all()
 
+UPDATABLE_METRIC_FIELDS = (
+    "interface_name", "collection_interval", "warning_threshold", "critical_threshold",
+    "alert_enabled", "alert_condition", "alert_min_samples", "enabled",
+)
+
+
+def _metric_key(definition_id: str, interface_index) -> tuple:
+    return (definition_id, interface_index)
+
+
 @router.post("/nodes/{node_id}", response_model=List[NodeMetric])
-def set_node_metrics(node_id: str, metrics: List[NodeMetricCreate], db: Session = Depends(get_db)):
-    """Set configured metrics for a node (replaces existing configuration)"""
-    # Verify node exists
+def set_node_metrics(node_id: str, metrics: List[NodeMetricCreate], request: Request, db: Session = Depends(get_db)):
+    """
+    Set the configured metrics for a node.
+
+    Rows are matched on (metric definition, interface index) and updated in
+    place, so their IDs stay stable and history, rates and alert state survive
+    edits to other metrics. Rows missing from the payload are removed.
+    """
     node = db.query(NodeDB).filter(NodeDB.id == node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
-        
-    # Delete existing metrics
-    db.query(NodeMetricDB).filter(NodeMetricDB.node_id == node_id).delete()
-    
-    new_metrics = []
+
+    existing = {
+        _metric_key(m.metric_definition_id, m.interface_index): m
+        for m in db.query(NodeMetricDB).filter(NodeMetricDB.node_id == node_id).all()
+    }
+
+    kept = []
+    seen = set()
     for m in metrics:
-        metric_db = NodeMetricDB(**m.model_dump())
-        # Ensure ID is new
-        metric_db.id = str(uuid.uuid4())
-        metric_db.node_id = node_id  # Ensure node_id is set
-        db.add(metric_db)
-        new_metrics.append(metric_db)
-        
+        key = _metric_key(m.metric_definition_id, m.interface_index)
+        if key in seen:
+            continue  # duplicate in payload, first one wins
+        seen.add(key)
+
+        row = existing.get(key)
+        if row is None:
+            row = NodeMetricDB(**m.model_dump())
+            row.id = str(uuid.uuid4())
+            row.node_id = node_id
+            db.add(row)
+        else:
+            for field in UPDATABLE_METRIC_FIELDS:
+                setattr(row, field, getattr(m, field))
+        kept.append(row)
+
+    removed = [row for key, row in existing.items() if key not in seen]
+    for row in removed:
+        db.delete(row)
+
     db.commit()
-    for m in new_metrics:
-        db.refresh(m)
-        
-    return new_metrics
+    for row in kept:
+        db.refresh(row)
+
+    # Drop runtime state of removed metrics so a stale alert cannot keep the node DEGRADED
+    pinger = getattr(request.app.state, "pinger", None)
+    if pinger and removed:
+        for row in removed:
+            pinger.metric_processor.alert_states.pop(row.id, None)
+            pinger.metric_processor.breach_counts.pop(row.id, None)
+            pinger.snmp_collector.current_values.pop(row.id, None)
+        pinger.metric_processor._save_alert_states()
+
+    return kept
 
 # --- INTERFACE DISCOVERY ---
 
