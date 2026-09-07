@@ -200,6 +200,23 @@ Default SNMP metric definitions are stored in `backend/snmp.json`. You can add c
 - **oid_template**: Use `{index}` placeholder for interface metrics.
 - **requires_index**: Set to `true` if the user needs to specify an index (e.g., Interface ID) or `false` for scalar values (like System Uptime).
 
+#### Which system metrics work on which device
+There is no single set of system OIDs that works everywhere, and this is especially true across Ubiquiti models: each firmware family exposes a different MIB. Interface metrics (traffic, errors, status) come from the standard IF-MIB and work on all of them. System metrics do not. Pick per device:
+
+| Device family | System metrics that work | Source MIB |
+|---|---|---|
+| UDM / UDM Pro, and any Net-SNMP Linux host (Pi-hole, NAS, Proxmox) | `Linux Load (1m/5m/15m)`, `CPU Idle/User/System (Net-SNMP)`, `Linux Mem Total/Available/Buffers/Cached`, `Linux Swap Total/Available`, `Sensor Temperature`, `TCP Connections`, `System Uptime` | UCD-SNMP-MIB (1.3.6.1.4.1.2021), temperature from its lm-sensors table |
+| UniFi switches and access points (USW, UAP) | `CPU (UniFi)`, `Linux Load (1m/5m/15m)`, `Linux Mem Total/Available` | HOST-RESOURCES + partial UCD |
+| EdgeSwitch | `Temperature`, `CPU Load (%)` | Broadcom (1.3.6.1.4.1.4413) |
+| Windows, printers, generic hosts | `CPU Utilization`, `Storage Used`, `System Uptime` | HOST-RESOURCES-MIB (1.3.6.1.2.1.25) |
+
+Notes:
+- **The UDM Pro reports no CPU percentage.** Use `CPU Idle (Net-SNMP)` with the alert condition set to **below** (for example warn under 30 % idle), or add `CPU User` and `CPU System`. `CPU Utilization` and `CPU (UniFi)` both return "no such object" on the UDM Pro.
+- **Temperature lives in a different place on every family.** The EdgeSwitch uses the Broadcom `Temperature` OID. Net-SNMP hosts including the UDM Pro use `Sensor Temperature`, which reads the lm-sensors table and needs a sensor index. Find the indices for a device with `snmpwalk -v2c -c <community> <ip> 1.3.6.1.4.1.2021.13.16.2.1.2`; on a UDM Pro these are typically 1 `temp-CPU`, 2 `temp-Local`, 3 `temp-PHY` and 4 `temp-cpu` (the hottest, the SoC package). Sensors reading 0 are unused.
+- **The UDM Pro reports no disk usage.** It exposes neither `hrStorage` nor `dskTable`, so `Disk Used (%)` and `Storage Used` stay empty there. Both work on Net-SNMP hosts where `disk` is configured in `snmpd.conf`.
+- A metric that returns nothing logs an SNMP warning and simply shows no value. Nothing breaks, but it is worth unchecking so the collector stops polling it.
+- To see what a device actually supports, walk it from the host: `snmpwalk -v2c -c <community> <ip> 1.3.6.1.4.1.2021` for the Net-SNMP tree.
+
 Example:
 ```json
 {

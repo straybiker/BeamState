@@ -468,10 +468,20 @@ const MetricsConfig = ({ nodes, groups = [] }) => {
                                                         value={currentIndex}
                                                         onChange={(e) => {
                                                             const val = parseInt(e.target.value);
-                                                            handleUpdateMetric(def.id, configEntry.interface_index, null, { interface_index: val });
+                                                            handleUpdateMetric(def.id, configEntry.interface_index, configEntry.interface_name, { interface_index: val });
                                                         }}
                                                         onClick={(e) => e.stopPropagation()}
                                                         placeholder="#"
+                                                    />
+                                                    <span className="text-xs text-slate-500">Label:</span>
+                                                    <input
+                                                        type="text"
+                                                        className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:border-purple-500 outline-none"
+                                                        value={configEntry.interface_name || ''}
+                                                        onChange={(e) => handleUpdateMetric(def.id, configEntry.interface_index, e.target.value || null, { interface_name: e.target.value || null })}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        placeholder="e.g. temp-CPU"
+                                                        title="Shown next to the metric name on the dashboard"
                                                     />
                                                 </div>
                                             )}

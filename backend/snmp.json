@@ -115,5 +115,140 @@
         "category": "system",
         "device_type": "unifi",
         "requires_index": false
+    },
+    {
+        "name": "Linux Load (5m)",
+        "oid_template": "1.3.6.1.4.1.2021.10.1.5.2",
+        "metric_type": "gauge",
+        "unit": "load_x100",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "Linux Load (15m)",
+        "oid_template": "1.3.6.1.4.1.2021.10.1.5.3",
+        "metric_type": "gauge",
+        "unit": "load_x100",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "CPU Idle (Net-SNMP)",
+        "oid_template": "1.3.6.1.4.1.2021.11.11.0",
+        "metric_type": "gauge",
+        "unit": "percent",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "CPU User (Net-SNMP)",
+        "oid_template": "1.3.6.1.4.1.2021.11.9.0",
+        "metric_type": "gauge",
+        "unit": "percent",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "CPU System (Net-SNMP)",
+        "oid_template": "1.3.6.1.4.1.2021.11.10.0",
+        "metric_type": "gauge",
+        "unit": "percent",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "Linux Mem Total",
+        "oid_template": "1.3.6.1.4.1.2021.4.5.0",
+        "metric_type": "gauge",
+        "unit": "kbytes",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "Linux Mem Buffers",
+        "oid_template": "1.3.6.1.4.1.2021.4.14.0",
+        "metric_type": "gauge",
+        "unit": "kbytes",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "Linux Mem Cached",
+        "oid_template": "1.3.6.1.4.1.2021.4.15.0",
+        "metric_type": "gauge",
+        "unit": "kbytes",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "Linux Swap Total",
+        "oid_template": "1.3.6.1.4.1.2021.4.3.0",
+        "metric_type": "gauge",
+        "unit": "kbytes",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "Linux Swap Available",
+        "oid_template": "1.3.6.1.4.1.2021.4.4.0",
+        "metric_type": "gauge",
+        "unit": "kbytes",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": false
+    },
+    {
+        "name": "Disk Used (%)",
+        "oid_template": "1.3.6.1.4.1.2021.9.1.9.{index}",
+        "metric_type": "gauge",
+        "unit": "percent",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": true
+    },
+    {
+        "name": "Storage Used",
+        "oid_template": "1.3.6.1.2.1.25.2.3.1.6.{index}",
+        "metric_type": "gauge",
+        "unit": "allocation_units",
+        "category": "system",
+        "device_type": "generic",
+        "requires_index": true
+    },
+    {
+        "name": "Sensor Temperature",
+        "oid_template": "1.3.6.1.4.1.2021.13.16.2.1.3.{index}",
+        "metric_type": "gauge",
+        "unit": "millicelsius",
+        "category": "system",
+        "device_type": "linux",
+        "requires_index": true
+    },
+    {
+        "name": "TCP Connections",
+        "oid_template": "1.3.6.1.2.1.6.9.0",
+        "metric_type": "gauge",
+        "unit": "connections",
+        "category": "system",
+        "device_type": "generic",
+        "requires_index": false
+    },
+    {
+        "name": "System Uptime",
+        "oid_template": "1.3.6.1.2.1.1.3.0",
+        "metric_type": "gauge",
+        "unit": "timeticks",
+        "category": "system",
+        "device_type": "generic",
+        "requires_index": false
     }
 ]
