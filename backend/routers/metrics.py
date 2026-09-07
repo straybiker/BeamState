@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 from database import get_db
-from models import MetricDefinition, MetricDefinitionDB, NodeMetric, NodeMetricCreate, NodeMetricDB, NodeDB, NodeInterface, NodeInterfaceDB, NodeInterfaceBase
+from models import (MetricDefinition, MetricDefinitionDB, NodeMetric, NodeMetricCreate, NodeMetricDB,
+                    NodeDB, NodeInterface, NodeInterfaceDB, NodeInterfaceBase, NodeCapability)
 from pysnmp.hlapi.v3arch.asyncio import (
     SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
     ObjectType, ObjectIdentity, walk_cmd,
@@ -110,6 +111,105 @@ def set_node_metrics(node_id: str, metrics: List[NodeMetricCreate], request: Req
         pinger.metric_processor._save_alert_states()
 
     return kept
+
+# --- CAPABILITY PROBE ---
+
+def _snmp_params(node: NodeDB) -> tuple:
+    group = node.group
+    community = node.snmp_community or (group.snmp_community if group else "public")
+    port = node.snmp_port or (group.snmp_port if group else 161)
+    return community, port
+
+
+def _snmp_enabled(node: NodeDB) -> bool:
+    if node.monitor_snmp is not None:
+        return bool(node.monitor_snmp)
+    return bool(node.group.monitor_snmp) if node.group else False
+
+
+@router.post("/probe/{node_id}", response_model=List[NodeCapability])
+async def probe_node(node_id: str, db: Session = Depends(get_db)):
+    """
+    Ask the device which metrics it supports.
+
+    Scalar metrics are tested in one multi-varbind GET. Indexed metrics have
+    their instance name column walked, so instances come back labelled. The
+    result is stored and used to filter the metrics configuration screen.
+    """
+    from capability_probe import probe_engine
+    from models import NodeCapabilityDB
+
+    node = db.query(NodeDB).filter(NodeDB.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    if not _snmp_enabled(node):
+        raise HTTPException(status_code=400, detail="SNMP monitoring not enabled for this node")
+
+    definitions = db.query(MetricDefinitionDB).filter(
+        MetricDefinitionDB.enabled == True,
+        MetricDefinitionDB.metric_source == "snmp"
+    ).all()
+    payload = [{
+        "id": d.id, "name": d.name, "oid_template": d.oid_template,
+        "requires_index": d.requires_index, "instance_oid": d.instance_oid,
+    } for d in definitions]
+
+    community, port = _snmp_params(node)
+    logger.info(f"Probing {node.name} ({node.ip}:{port}) against {len(payload)} definitions")
+
+    try:
+        rows = await probe_engine.probe(node.ip, community, port, payload)
+    except Exception as e:
+        logger.error(f"Probe failed for {node.name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Probe failed: {e}")
+
+    if not rows:
+        raise HTTPException(status_code=504, detail="Device did not answer the probe")
+
+    # Replace the stored capability snapshot for this node
+    db.query(NodeCapabilityDB).filter(NodeCapabilityDB.node_id == node_id).delete()
+    for r in rows:
+        db.add(NodeCapabilityDB(
+            node_id=node_id,
+            metric_definition_id=r["definition_id"],
+            instance_index=r["instance_index"],
+            instance_label=r["instance_label"],
+            supported=r["supported"],
+            sample_value=r["sample_value"],
+            probed_at=r["probed_at"],
+        ))
+    db.commit()
+
+    supported = sum(1 for r in rows if r["supported"])
+    logger.info(f"Probe of {node.name}: {supported} of {len(rows)} candidates supported")
+    return _capability_response(db, node_id)
+
+
+@router.get("/capabilities/{node_id}", response_model=List[NodeCapability])
+def read_capabilities(node_id: str, db: Session = Depends(get_db)):
+    """Stored probe result for a node. Empty list when it has never been probed."""
+    return _capability_response(db, node_id)
+
+
+def _capability_response(db: Session, node_id: str) -> list:
+    from models import NodeCapabilityDB
+    rows = (db.query(NodeCapabilityDB, MetricDefinitionDB)
+              .join(MetricDefinitionDB, NodeCapabilityDB.metric_definition_id == MetricDefinitionDB.id)
+              .filter(NodeCapabilityDB.node_id == node_id)
+              .all())
+    return [{
+        "metric_definition_id": cap.metric_definition_id,
+        "metric_name": definition.name,
+        "category": definition.category,
+        "unit": definition.unit,
+        "requires_index": definition.requires_index,
+        "instance_index": cap.instance_index,
+        "instance_label": cap.instance_label,
+        "supported": cap.supported,
+        "sample_value": cap.sample_value,
+        "probed_at": cap.probed_at,
+    } for cap, definition in rows]
+
 
 # --- INTERFACE DISCOVERY ---
 

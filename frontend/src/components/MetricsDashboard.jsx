@@ -20,6 +20,7 @@ const Sparkline = ({ points, color = 'stroke-blue-400', width = 96, height = 22 
 const MetricsDashboard = () => {
     const [nodes, setNodes] = useState([]);
     const [definitions, setDefinitions] = useState([]);
+    const [definitionsById, setDefinitionsById] = useState({});
     const [nodeConfigs, setNodeConfigs] = useState({});
 
     // We need history to calculate rates. { metric_id: { value, timestamp } }
@@ -55,14 +56,16 @@ const MetricsDashboard = () => {
 
                 // Show SNMP nodes plus any node that has metrics configured (e.g. ICMP latency)
                 const nodeRes = await api.get('/config/nodes');
-                const allNodes = nodeRes.data.filter(n => {
-                    if (configs[n.id]?.length) return true;
-                    if (n.monitor_snmp === true) return true;
-                    if (n.monitor_snmp === false) return false;
+                const snmpActive = (n) => {
+                    if (n.monitor_snmp !== null) return n.monitor_snmp;
                     const group = groups.find(g => g.id === n.group_id);
                     return group ? group.monitor_snmp : false;
-                });
+                };
+                const allNodes = nodeRes.data
+                    .filter(n => configs[n.id]?.length || snmpActive(n))
+                    .map(n => ({ ...n, snmpActive: snmpActive(n) }));
                 setNodes(allNodes);
+                setDefinitionsById(Object.fromEntries((await api.get('/metrics/definitions')).data.map(d => [d.id, d])));
 
             } catch (e) {
                 console.error("Failed to load metadata", e);
@@ -224,6 +227,17 @@ const MetricsDashboard = () => {
                                 </h3>
                                 <div className="text-xs text-slate-500 font-mono">{node.ip}</div>
                             </div>
+                            {(() => {
+                                // Metrics configured on a node whose SNMP is off never collect
+                                const stalled = !node.snmpActive && configs.some(c => (definitionsById[c.metric_definition_id]?.metric_source || 'snmp') === 'snmp');
+                                if (!stalled) return null;
+                                return (
+                                    <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-200 text-xs flex items-center gap-2">
+                                        <AlertCircle size={14} className="flex-shrink-0 text-amber-400" />
+                                        SNMP is off for this node, so its SNMP metrics are not collected.
+                                    </div>
+                                );
+                            })()}
 
                             <div className="p-4 space-y-4 flex-1">
                                 {/* System Metrics */}

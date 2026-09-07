@@ -44,13 +44,14 @@ def seed_metric_definitions():
             else:
                 # Update fields if changed
                 changed = False
-                if existing.unit != metric_data["unit"]:
-                    existing.unit = metric_data["unit"]
-                    changed = True
-                if existing.oid_template != metric_data["oid_template"]:
-                    existing.oid_template = metric_data["oid_template"]
-                    changed = True
-                
+                for field in ("unit", "oid_template", "instance_oid", "requires_index",
+                              "category", "device_type", "metric_type"):
+                    if field not in metric_data:
+                        continue
+                    if getattr(existing, field) != metric_data[field]:
+                        setattr(existing, field, metric_data[field])
+                        changed = True
+
                 if changed:
                     count += 1 # Count updates too
                     logger.info(f"Updated metric definition: {metric_data['name']}")
