@@ -4,108 +4,85 @@
 
 # BeamState Network Monitor
 
-A real-time network monitoring application that pings configured nodes, monitors SNMP metrics (Cpu, Memory, Traffic, etc.), and displays their status on a dashboard.
+Self-hosted network monitoring for a home lab. BeamState pings your devices, collects SNMP metrics from them, alerts you when something breaks or degrades, and keeps the history so you can tell which device is unreliable.
+
+It asks each device what it can actually report rather than assuming, which matters once a network mixes routers, switches, access points, servers and printers: they rarely expose the same OIDs.
 
 ## Features
 
-- **Real-time Monitoring**: Async pinging with configurable intervals.
-- **SNMPv2c Support**: Monitor generic and specific OIDs (Interface Traffic, CPU, Memory, Uptime).
-- **Customizable Metrics**: Define your own OIDs in `backend/snmp.json` and configure them via the UI.
-- **Enhanced Network Discovery**: Scan subnets for ICMP and SNMP devices, merging results intelligently with existing configurations.
-- **Modern Dashboard**: Dark-themed UI showing node status, latency, SNMP availability, and detailed metrics.
-- **Web-Based Configuration**: Add, edit, and remove groups/nodes/metrics directly from the UI.
-- **Flexible Storage**: SQLite is the source of truth for topology, metric config and history. Optional InfluxDB for long-term time-series data.
-- **Bootstrap and Backup**: `config.json` seeds an empty database and is rewritten as an export after every change. `GET /config/export` and `POST /config/import` move a topology between hosts.
-- **Smart Notifications**: Pushover and generic JSON webhook (ntfy, Discord, Home Assistant) with priority management, storm throttling and recovery messages.
-- **Degraded State**: A reachable node with a metric outside its thresholds is DEGRADED, not DOWN. Metric alerts can require N consecutive samples before they raise.
-- **Dependencies**: Give a node a parent. While the parent is DOWN, the child's DOWN alert is suppressed.
-- **State History**: Every status change is stored in SQLite with configurable retention and shown on the Trace page.
-- **Heartbeat**: Optional deadman ping to Healthchecks.io, Uptime Kuma or Home Assistant so you notice when BeamState itself stops.
+- **Reachability monitoring**: Async ICMP and SNMPv2c checks with per-group and per-node intervals, packet counts and retry limits.
+- **Metric collection**: Interface traffic and errors, CPU, memory, load, temperature, storage and uptime, each on its own collection interval.
+- **Device capability probing**: One click asks a device which metrics it supports and discovers its sensors, disks and interfaces **by name**. The configuration screen then hides what the device cannot answer.
+- **Five node states**: UP, DEGRADED, PENDING, DOWN and PAUSED. A reachable device with a metric out of range is degraded, not down.
+- **Alerting that stays quiet**: Pushover and generic JSON webhook, consecutive-sample confirmation, hysteresis, storm throttling, parent dependencies, recovery and reboot messages, maintenance mode.
+- **History and reliability**: Every state change is persisted. Availability, downtime and flap counts per node over 24 hours and 30 days.
+- **Metric history**: Short-term samples in SQLite drive sparklines on the Metrics page. Optional InfluxDB for long-term trends and Grafana.
+- **Live dashboard**: Server-sent events push each completed check, with polling as a fallback.
+- **Network discovery**: Scan a subnet for ICMP and SNMP devices and import them into a group.
+- **Heartbeat**: Deadman ping to Healthchecks.io, Uptime Kuma or Home Assistant, so you notice when BeamState itself stops.
+- **Backup by design**: SQLite is the source of truth; `config.json` is a continuously rewritten export you can copy to another host.
 
 ## Screenshots
 
 ### Dashboard
 ![Dashboard View](screenshots/dashboard.png)
-*Real-time monitoring dashboard showing node status, latency, and protocol availability*
+*Node status, latency and availability per node, grouped by network segment*
 
-### SNMP Metrics
-![SNMP Metrics](screenshots/snmp_metrics.png)
-*Detailed SNMP metric visualization for configured devices*
-
+### Metrics
+![Metrics Dashboard](screenshots/snmp_metrics.png)
+*Live SNMP and ICMP metrics with sparklines from the short-term history*
 
 ## Quick Start (Windows)
 
-The easiest way to run the application locally on Windows is via the provided PowerShell script.
+For local development on Windows, use the provided PowerShell script.
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/BeamState.git
+   git clone https://github.com/straybiker/BeamState.git
    cd BeamState
    ```
 
-2. **Configure the Application**
+2. **Create the configuration file**
    ```bash
    cd backend
    cp config.json.example config.json
-   # Edit config.json with your settings (InfluxDB, network topology, etc.)
+   cd ..
    ```
-   
-   **Important**: The `config.json` file contains sensitive data (InfluxDB tokens, network topology). It is gitignored and will not be committed to version control.
+   Everything in it can also be set from the UI later. `config.json` holds secrets (InfluxDB and Pushover tokens) and is gitignored.
 
-3. **Start the Application**
-   Open PowerShell and run (Administrator is only needed if ICMP raw sockets are blocked on your Windows build):
+3. **Start the application**
    ```powershell
    .\start-app.ps1
    ```
-   This script will:
-   - Check and stop any existing instances on ports 8000/5173.
-   - Start the Backend (Uvicorn) on port 8000.
-   - Start the Frontend (Vite) on port 5173.
+   Starts Uvicorn on port 8000 and Vite on port 5173, after freeing those two ports. Administrator rights are only needed if ICMP raw sockets are blocked on your Windows build.
 
-4. **Open the Application**
+4. **Open it**
    - Frontend: [http://localhost:5173](http://localhost:5173)
-   - Backend API: [http://localhost:8000](http://localhost:8000)
-   - API Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-
-## Documentation
-
-- [**Grafana Guide**](GRAFANA_GUIDE.md): Detailed instructions for setting up Grafana dashboards and alerts for BeamState.
+   - API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ## Docker Deployment
 
-For containerized deployment (e.g., on Proxmox LXC), use Docker Compose. Both containers carry healthchecks; the frontend waits for a healthy backend.
+For a containerised deployment, for example in a Proxmox LXC. Both containers carry healthchecks and the frontend waits for a healthy backend.
 
 ### 1. Installation
 
-1.  **Clone the Repository**
-    ```bash
-    git clone https://github.com/straybiker/BeamState.git
-    cd BeamState
-    ```
+```bash
+git clone https://github.com/straybiker/BeamState.git
+cd BeamState
+cp backend/config.json.example backend/config.json
+docker compose up -d --build
+```
 
-2.  **Configure Application**
-    Docker mounts the `backend/config.json` file. You must create this before starting.
-    ```bash
-    cd backend
-    cp config.json.example config.json
+Create `backend/config.json` **before** the first start. Docker bind-mounts that exact path, so if the file does not exist Docker creates a *directory* with that name and the backend cannot read or write it. Check with `ls -ld backend/config.json`; a leading `d` means this happened.
 
-    # Optional. You can do it from the UI later
-    nano config.json 
-    # Add your network topology and InfluxDB settings here
-    cd ..
-    ```
+Sizing: about 1.5 GB of free disk is needed to build both images. A 4 GB root disk is tight, since the two builds run in parallel.
 
-3.  **Start Services**
-    ```bash
-    docker compose up -d --build
-    ```
+### 2. Upgrading
 
-### 2. Upgrading / Redeploying
-
-Run this on the Proxmox host (inside the LXC) from the repository directory.
+Run from the repository directory inside the LXC.
 
 ```bash
-# 1. Back up the database and the config file (see Data Persistence for the online backup)
+# 1. Back up the database and config
 docker exec beamstate-backend python -c "import sqlite3; s=sqlite3.connect('/app/data/beamstate.db'); d=sqlite3.connect('/app/data/beamstate.backup.db'); s.backup(d); d.close()"
 cp backend/config.json backend/config.json.bak
 
@@ -113,128 +90,225 @@ cp backend/config.json backend/config.json.bak
 git pull
 
 # 3. Rebuild and restart
-# --force-recreate ensures the frontend picks up new configs
 docker compose up -d --build --force-recreate
 
 # 4. Verify
-docker compose ps                      # both containers "healthy" within about a minute
-docker compose logs -f backend         # Ctrl+C to stop following
+docker compose ps                 # both containers "healthy" within about a minute
+docker compose logs -f backend    # Ctrl+C stops following
 ```
 
-Schema migrations run automatically at startup. Nothing needs to be done by hand for the database.
+Schema migrations run automatically at startup. Nothing has to be done to the database by hand.
 
-**First start after upgrading to the source-of-truth release**, expect these log lines and actions:
-
-1. `Import policy: config.json modified after last export, importing` followed by `Import complete`. The old-format file is imported once (an upsert of what is already in the database) and rewritten with `exported_at` and the metric configuration. Later restarts skip the import.
-2. Open **Configuration → Groups** and re-enter any group-level SNMP settings (community, port, protocol flags). Earlier releases reset them to defaults on every restart; from now on they persist.
-3. Open **Configuration → Metrics** and set **Samples** to 2 or 3 on noisy metrics such as ICMP Latency. Existing metrics keep 1, which alerts on a single spike.
-4. Nodes with a metric outside its thresholds now show **DEGRADED** instead of DOWN. Review thresholds that were tuned around the old behaviour.
-5. Optional, under **Configuration → Settings**: enable the webhook channel, the heartbeat, and check the history retention values.
-
-If something goes wrong, roll back with the backups from step 1:
+Roll back with the backups from step 1:
 
 ```bash
 docker compose down
 cp backend/data/beamstate.backup.db backend/data/beamstate.db
 cp backend/config.json.bak backend/config.json
-git checkout <previous-commit>
+git checkout <previous-tag>
 docker compose up -d --build --force-recreate
 ```
 
-### 3. Access
+If a build fails with **no space left on device**, reclaim it with `docker builder prune -f` and `docker image prune -f`, or grow the container disk from the Proxmox host with `pct resize <vmid> rootfs +4G`.
+
+### 3. Post-upgrade checklist
+
+Only relevant when coming from a release older than the one named.
+
+**From before v1.2.0**
+1. Open **Configuration → Metrics**, select each SNMP node and press **Probe device**. This discovers what each device supports and names its sensors, disks and interfaces.
+2. Enable SNMP on nodes that have metrics configured but SNMP switched off. Those metrics were never collected; both the Metrics dashboard and the config screen now flag them.
+3. Review the new Net-SNMP metrics if you run a UDM Pro, Pi-hole, NAS or any Linux host. See [Which system metrics work on which device](#which-system-metrics-work-on-which-device).
+
+**From before v1.1.0**
+1. Expect `Import policy: config.json modified after last export, importing` in the log once. The old-format file is imported and rewritten with `exported_at` and metric configuration. Later restarts skip it.
+2. Re-enter group-level SNMP settings under **Configuration → Groups**. Older releases reset them on every restart; they persist now.
+3. Set **Samples** to 2 or 3 on noisy metrics such as ICMP latency. Existing metrics keep 1, which alerts on a single spike.
+4. Nodes with a metric out of range now show **DEGRADED** instead of DOWN. Review thresholds tuned around the old behaviour.
+5. Optionally enable the webhook channel and heartbeat under **Configuration → Settings**.
+
+### 4. Access
+
 - **Frontend**: `http://<YOUR_IP>:3000`
-- **Backend API**: `http://<YOUR_IP>:8000` (Swagger at `/docs`)
+- **Backend API**: `http://<YOUR_IP>:8000`, Swagger at `/docs`
 
-The API has no authentication yet. Keep both ports on the LAN or behind a reverse proxy with its own authentication.
+The API has no authentication yet, and node endpoints return SNMP community strings. Keep both ports on the LAN or behind a reverse proxy that authenticates.
 
-### 4. Data Persistence
-Both the database and the configuration file live on the host through bind mounts, so they survive `docker compose up -d --build --force-recreate`.
+### 5. Data Persistence
+
+The database and the configuration file live on the host through bind mounts, so they survive a rebuild.
 
 | Host path | Contents | Role |
 |---|---|---|
-| `./backend/data/beamstate.db` | groups, nodes, dependencies, metric config, discovered interfaces, state history, metric samples | **source of truth** |
-| `./backend/config.json` | export of the topology and metric config plus `app_config` (settings and secrets) | mirror and backup, rewritten after every change |
-| `./backend/data/alert_states.json`, `system.log*`, `logs.json` | active metric alert levels, application log, monitoring data log | runtime state |
+| `backend/data/beamstate.db` | groups, nodes, dependencies, metric config, capabilities, interfaces, state history, metric samples | **source of truth** |
+| `backend/config.json` | export of the topology and metric config, plus `app_config` (settings and secrets) | mirror and backup, rewritten after every change |
+| `backend/data/alert_states.json` | active metric alert levels | runtime state |
+| `backend/data/system.log*`, `logs.json` | application log (rotating, 5 MB × 3) and monitoring data log | runtime state |
 
-- **Fresh volume or lost database**: the import policy sees an empty database and rebuilds groups, nodes, dependencies and metric configuration from `config.json`. Only history tables (state events, metric samples) are lost.
-- **Keep the mount on local disk.** SQLite does not work reliably on NFS or SMB shares because of file locking. A bind mount inside a Proxmox LXC is fine.
-- **Backups**: a Proxmox snapshot or backup of the LXC covers everything. To copy the database by hand while the container runs, use SQLite's online backup so you never copy a half-written file:
-  ```bash
-  docker exec beamstate-backend python -c "import sqlite3; s=sqlite3.connect('/app/data/beamstate.db'); d=sqlite3.connect('/app/data/beamstate.backup.db'); s.backup(d); d.close()"
-  ```
-- **Size**: metric samples are the only fast-growing table, roughly 1,500 rows per metric per day, pruned after `history.metric_retention_days` (default 3). Expect tens of megabytes.
-- **InfluxDB**: if enabled, time-series data is stored on your InfluxDB instance (not in these containers).
+- **Fresh volume or lost database**: the import policy sees an empty database and rebuilds groups, nodes, dependencies and metric configuration from `config.json`. Only the history tables are lost.
+- **Keep the mount on local disk.** SQLite is unreliable on NFS or SMB because of file locking. A bind mount inside an LXC is fine.
+- **Backups**: a Proxmox snapshot covers everything. To copy the database while the container runs, use SQLite's online backup as in the upgrade steps above, so you never copy a half-written file.
+- **Size**: metric samples grow fastest, roughly 1,500 rows per metric per day, pruned after `history.metric_retention_days` (default 3). Expect tens of megabytes.
+- **InfluxDB**: when enabled, time-series data is stored on your InfluxDB instance, not in these containers.
 
 ## Configuration
 
-### Initial Setup
-1. Copy `backend/config.json.example` to `backend/config.json`
-2. Configure your InfluxDB connection (optional but recommended for time-series data)
-3. Define your initial network topology (groups and nodes)
-4. Adjust logging preferences
+Almost everything is configurable from the UI under **Configuration**. The tabs are Nodes, Metrics, Groups and Settings.
 
-### Application Config (`app_config`)
-The `app_config` section in `config.json` contains global settings:
-- **InfluxDB**: Connection details for time-series storage (can also be configured via UI)
-- **Logging**: File logging settings and retention policy
+### Network topology
 
-### Network Topology
-The **database is the source of truth**. `config.json` is an export of it: groups, nodes, dependencies and metric configuration, rewritten after every change in the UI and at startup. Treat the file as a backup you can copy to another host.
+The **database is the source of truth**. `config.json` is an export of it: groups, nodes, dependencies and metric configuration, rewritten after every change in the UI and at startup. Treat the file as a portable backup.
 
 - `GET /config/export` returns the same document without secrets.
-- `POST /config/import` upserts a document into the database. Nothing is deleted. Nodes that carry a `metrics` list get their metric configuration replaced, matched to definitions by name.
-- At startup `should_import_config()` in `backend/cleanup.py` decides whether the file is imported before the export runs. It imports in three cases: the file contains `"import": true` (consumed on the next start), the database has no groups yet, or the file was modified more than 5 seconds after its `exported_at` timestamp (hand edit or restored backup). A file without `exported_at` is imported once and rewritten in the new format.
+- `POST /config/import` upserts a document. Nothing is deleted. Nodes carrying a `metrics` list get their metric configuration replaced, matched to definitions by **name** rather than id, so an export moves between installs.
+- At startup, `should_import_config()` in `backend/cleanup.py` decides whether the file is imported before the export runs. It imports in three cases: the file contains `"import": true` (consumed on the next start), the database has no groups yet, or the file was modified more than 5 seconds after its `exported_at` timestamp, meaning a hand edit or a restored backup. A file without `exported_at` is imported once and rewritten in the new format.
 
-### Reliability and Reboots
-- `GET /trace/availability?windows=24,720` returns availability, downtime and DOWN count per node, computed from the state history. PENDING is not counted as downtime, PAUSED time is excluded. The dashboard shows the 24 h value per node, the Trace page lists the least available nodes.
-- SNMP nodes report **reboots**: a `sysUpTime` lower than the previous reading raises a `node_reboot` notification with the previous uptime. Toggle under Settings.
+Per node you can set the interval, packet count, retry limit, protocols, SNMP community and port, alert priority, and a **parent** whose outage suppresses this node's alerts. Empty fields inherit the group value.
 
-### Metric History
-Every processed metric value is kept in `metric_samples` for `history.metric_retention_days` (default 3). `GET /metrics/history?hours=6&points=48` returns bucketed averages that feed the sparklines on the Metrics page. InfluxDB remains the choice for long-term trends.
+### Application settings (`app_config`)
 
-### Live Dashboard
-The dashboard subscribes to `GET /status/stream` (SSE). Each completed check pushes one node result; configuration changes push a `config` event so the page refetches groups and settings. Polling every 15 s stays as a fallback while the stream is disconnected.
+| Section | Keys | Purpose |
+|---|---|---|
+| `influxdb` | `enabled`, `url`, `org`, `bucket`, `token` | Long-term time series for Grafana |
+| `logging` | `file_enabled`, `file_path`, `retention_lines`, `log_level` | Monitoring data log and application log level |
+| `pushover` | `enabled`, `token`, `user_key`, `priority`, `message_template`, `throttling_enabled`, `alert_threshold`, `alert_window`, `maintenance_mode` | Push notifications and storm throttling |
+| `webhook` | `enabled`, `url` | Generic JSON notifications |
+| `alerting` | `notify_recovery`, `notify_reboot` | Whether recovery and reboot messages are sent |
+| `heartbeat` | `enabled`, `url`, `interval` | Deadman ping proving BeamState is alive |
+| `history` | `retention_days`, `metric_retention_days` | State event and metric sample retention |
 
-### SNMP Metrics (`snmp.json`)
-Default SNMP metric definitions are stored in `backend/snmp.json`. You can add custom OIDs here.
-- **oid_template**: Use `{index}` placeholder for interface metrics.
-- **requires_index**: Set to `true` if the user needs to specify an index (e.g., Interface ID) or `false` for scalar values (like System Uptime).
+Secrets and any URL that can embed a token are returned as `***REDACTED***` by `GET /config/app` and preserved when you save without changing them.
 
-#### Probe device
-There is no single set of system OIDs that works everywhere, so BeamState asks each device instead of guessing. In **Configuration → Metrics**, pick a node and press **Probe device**:
+### Node states
 
-- Every scalar metric is tested in one multi-varbind SNMP GET. Anything the device answers is supported.
-- Every indexed metric has its instance name column walked, so sensors, disks, storage and interfaces arrive **named**. You tick "temp-cpu", not index 4.
-- The result is stored per node. The configuration screen then lists only the supported metrics and collapses the rest behind *Not supported by this device*, which stays expandable in case a firmware update adds an OID.
+| State | Meaning |
+|---|---|
+| UP | Reachable, all metrics within thresholds |
+| DEGRADED | Reachable, at least one metric in WARNING or CRITICAL |
+| PENDING | A reachability check failed, retrying at one third of the interval |
+| DOWN | Retries exhausted |
+| PAUSED | Node or group disabled |
+
+A node is reachable only when **all** its configured protocols succeed. Metric alerts can never make a node DOWN, only DEGRADED, so DOWN unambiguously means unreachable.
+
+### Notifications
+
+Both channels are configured under **Settings** and can be active at once. Maintenance mode suppresses every channel.
+
+- **Pushover**: user key and API token, priority -2 (lowest) to 2 (emergency, retried every 60 s for 1 h). A per-node priority overrides the global value.
+- **Webhook**: JSON POST to any URL, which covers ntfy, Discord, Home Assistant and n8n. Payload: `source`, `event`, `title`, `message`, `priority`, `timestamp`, plus context such as `node`, `ip`, `group`, `status`, or the metric name, value and unit.
+
+| `event` | Sent when |
+|---|---|
+| `node_down` | Retries exhausted |
+| `node_up` | A DOWN node is reachable again, with the downtime |
+| `node_reboot` | SNMP uptime dropped, meaning the device restarted |
+| `metric_warning`, `metric_critical` | A metric crossed a threshold and the sample count was met |
+| `metric_resolved` | A metric returned to normal |
+| `alert_storm` | Throttling engaged, one summary instead of many alerts |
+
+Noise controls, in the order they apply:
+
+1. **Consecutive samples**: an alert raises only after N breaching samples in a row.
+2. **Hysteresis**: a 5 % band keeps a metric alerting until it is clearly back in range.
+3. **Cooldown**: 60 seconds between messages for the same metric.
+4. **Parent dependency**: while a parent is DOWN, the child's DOWN alert and its recovery message are suppressed.
+5. **Storm throttling**: more than X alerts within Y seconds pauses individual alerts and sends one summary.
+
+### Metric alerts
+
+Per metric: a condition (above or below), warning and critical thresholds, and **Samples**, the number of consecutive breaching samples before the alert raises. Recovery is immediate. Metrics of a paused node or group raise nothing.
+
+### Reliability and reboots
+
+- `GET /trace/availability?windows=24,720` returns availability, downtime and DOWN count per node from the state history. PENDING is not counted as downtime and PAUSED time is excluded from the window. The dashboard shows the 24-hour figure beside each node; the Trace page ranks the least available.
+- SNMP nodes report **reboots**. A `sysUpTime` lower than the previous reading raises `node_reboot` with the previous uptime, which catches restarts that fall between two checks. Counter wrap at 497 days is not mistaken for a reboot.
+
+### History
+
+- **State events**: every transition is written to `state_events` and served by `GET /trace/events?limit=&node_id=&hours=`. Retention in days is set under Settings, 0 keeps everything.
+- **Metric samples**: every processed value is kept in `metric_samples`. `GET /metrics/history?hours=6&points=48` returns bucketed averages that feed the sparklines. InfluxDB remains the right choice for long-term trends.
+
+### Live dashboard
+
+The dashboard subscribes to `GET /status/stream`. It receives a snapshot on connect, one message per completed check, and a `config` event when groups, nodes or settings change. Polling every 15 seconds is the fallback while the stream is down; the header badge shows which mode is active.
+
+### Heartbeat
+
+Set a ping URL under Settings, from Healthchecks.io, an Uptime Kuma push monitor or a Home Assistant webhook. BeamState sends a GET on the configured interval and the receiving service alerts you when the pings stop. Set the receiver's grace period to two or three times the interval so a container restart is not a false alarm.
+
+## SNMP Metrics
+
+### Probe device
+
+There is no set of system OIDs that works everywhere, so BeamState asks each device instead of guessing. Under **Configuration → Metrics**, pick a node and press **Probe device**:
+
+- Every scalar metric is tested in a single multi-varbind SNMP GET. Anything the device answers is supported.
+- Every indexed metric has its instance name column walked, so sensors, disks, storage and interfaces arrive **named**. You tick "temp-cpu" instead of typing index 4.
+- The result is stored per node. The configuration screen lists only supported metrics and collapses the rest behind *Not supported by this device*, which stays expandable in case a firmware update adds an OID.
+- Each row shows the reading seen while probing, so a sensor stuck at 0 is obvious.
 - **Enable all** switches on every supported scalar system metric in one click.
 
-Probing is cheap: about 0.1 to 0.7 seconds for UniFi hardware. Re-probe after a firmware update or when you add an interface. A node that has never been probed shows every metric, exactly as before.
+Probing takes 0.1 to 0.7 seconds on UniFi hardware, longer on slow devices such as printers. Re-probe after a firmware update or when interfaces change. A node that has never been probed lists every metric, as before.
 
-The result also exposes the current reading next to each metric, which makes it obvious whether a sensor is live or reporting zero.
+### Which system metrics work on which device
 
-#### Which system metrics work on which device
-For reference, this is what probing found across one home lab. Interface metrics come from the standard IF-MIB and work everywhere; system metrics do not:
+Interface metrics come from the standard IF-MIB and work everywhere. System metrics do not. This is what probing found across one home lab:
 
-| Device family | System metrics that work | Source MIB |
+| Device family | Supported system metrics | Source MIB |
 |---|---|---|
-| UDM / UDM Pro, and any Net-SNMP Linux host (Pi-hole, NAS, Proxmox) | `Linux Load (1m/5m/15m)`, `CPU Idle/User/System (Net-SNMP)`, `Linux Mem Total/Available/Buffers/Cached`, `Linux Swap Total/Available`, `Sensor Temperature`, `TCP Connections`, `System Uptime` | UCD-SNMP-MIB (1.3.6.1.4.1.2021), temperature from its lm-sensors table |
-| UniFi switches and access points (USW, UAP) | `CPU (UniFi)`, `Linux Load (1m/5m/15m)`, `Linux Mem Total/Available` | HOST-RESOURCES + partial UCD |
-| EdgeSwitch | `Temperature`, `CPU Load (%)` | Broadcom (1.3.6.1.4.1.4413) |
-| Windows, printers, generic hosts | `CPU Utilization`, `Storage Used`, `System Uptime` | HOST-RESOURCES-MIB (1.3.6.1.2.1.25) |
+| UDM Pro, and any Net-SNMP Linux host (Pi-hole, NAS, Proxmox, Docker host) | `Linux Load (1m/5m/15m)`, `CPU Idle/User/System (Net-SNMP)`, `Linux Mem Total/Available/Buffers/Cached`, `Linux Swap Total/Available`, `Sensor Temperature`, `TCP Connections`, `System Uptime` | UCD-SNMP-MIB (1.3.6.1.4.1.2021), temperature from its lm-sensors table |
+| UniFi switches and access points (USW, UAP, U6) | `CPU (UniFi)`, `Linux Load (1m/5m/15m)`, `Linux Mem Total/Available/Buffers/Cached`, `Linux Swap Total/Available`, `System Uptime` | HOST-RESOURCES for CPU, UCD for the rest. No temperature sensor |
+| EdgeSwitch | `Temperature`, `CPU Load (%)`, `TCP Connections`, `System Uptime` | Broadcom (1.3.6.1.4.1.4413) |
+| Printers, Windows, other generic hosts | `Storage Used`, `System Uptime`, `TCP Connections` | HOST-RESOURCES-MIB (1.3.6.1.2.1.25) |
 
 Notes:
-- **The UDM Pro reports no CPU percentage.** Use `CPU Idle (Net-SNMP)` with the alert condition set to **below** (for example warn under 30 % idle), or add `CPU User` and `CPU System`. `CPU Utilization` and `CPU (UniFi)` both return "no such object" on the UDM Pro.
-- **A custom OID needs one extra field to be discoverable.** For an indexed metric, set `instance_oid` to the table column that holds the instance names (`1.3.6.1.2.1.2.2.1.2` for interfaces, `1.3.6.1.4.1.2021.13.16.2.1.2` for lm-sensors). Probing walks that column to offer named instances. Without it the metric still works, but you must enter the index by hand.
-- **Temperature lives in a different place on every family.** The EdgeSwitch uses the Broadcom `Temperature` OID. Net-SNMP hosts including the UDM Pro use `Sensor Temperature`, which reads the lm-sensors table and needs a sensor index. Find the indices for a device with `snmpwalk -v2c -c <community> <ip> 1.3.6.1.4.1.2021.13.16.2.1.2`; on a UDM Pro these are typically 1 `temp-CPU`, 2 `temp-Local`, 3 `temp-PHY` and 4 `temp-cpu` (the hottest, the SoC package). Sensors reading 0 are unused.
-- **The UDM Pro reports no disk usage.** It exposes neither `hrStorage` nor `dskTable`, so `Disk Used (%)` and `Storage Used` stay empty there. Both work on Net-SNMP hosts where `disk` is configured in `snmpd.conf`.
-- A metric that returns nothing logs an SNMP warning and simply shows no value. Nothing breaks, but it is worth unchecking so the collector stops polling it.
-- To see what a device actually supports, walk it from the host: `snmpwalk -v2c -c <community> <ip> 1.3.6.1.4.1.2021` for the Net-SNMP tree.
 
-Example:
+- **The UDM Pro reports no CPU percentage.** Use `CPU Idle (Net-SNMP)` with the condition set to **below**, for example warn under 30 % idle, or add `CPU User` and `CPU System`. Both `CPU Utilization` and `CPU (UniFi)` return "no such object" on it.
+- **The UDM Pro reports no disk usage.** It exposes neither `hrStorage` nor `dskTable`. `Disk Used (%)` and `Storage Used` work on Net-SNMP hosts where `disk` is configured in `snmpd.conf`.
+- **Temperature sits in a different place per family.** EdgeSwitch uses the Broadcom `Temperature` OID. Net-SNMP hosts including the UDM Pro use `Sensor Temperature` from the lm-sensors table, which needs a sensor index; probing discovers and names them. On a UDM Pro expect `temp-CPU`, `temp-Local`, `temp-PHY` and `temp-cpu`, the last being the SoC package and the hottest. Sensors reading 0 are unpopulated.
+- **UniFi access points must have SNMP enabled in the UniFi controller** as well as in BeamState.
+
+### Defining custom metrics (`snmp.json`)
+
+Definitions live in `backend/snmp.json` and are seeded into the database at startup, matched by `name`. Editing a definition updates it in place; adding one makes it available everywhere.
+
+| Field | Purpose |
+|---|---|
+| `name` | Display name and the key used for seeding and for import matching. Must be unique |
+| `oid_template` | The OID. Use `{index}` for a table column |
+| `metric_type` | `gauge` for a value, `counter` for something that only increases. Counters are converted to a per-second rate |
+| `unit` | Controls formatting and rate conversion, see the table below |
+| `category` | `interface` puts the metric in the interface section, anything else in system metrics |
+| `device_type` | Informational only |
+| `metric_source` | `snmp` (default) or `icmp` for internally computed metrics |
+| `requires_index` | `true` when the OID needs an instance index |
+| `instance_oid` | The table column holding instance **names**. Probing walks it to offer named instances. Optional, but without it the index must be typed by hand |
+
+Units the UI understands:
+
+| `unit` | Rendered as |
+|---|---|
+| `bytes` | KB, MB or GB. As a `counter`, converted to bits per second and shown as Kbps, Mbps or Gbps |
+| `kbytes` | Same, scaled from kilobytes |
+| `percent` | `42.5%` |
+| `celsius` | `66°C` |
+| `millicelsius` | Divided by 1000, `48°C` |
+| `load_x100` | Divided by 100, `2.04` |
+| `ms` | `5.33 ms` |
+| `timeticks` | Hundredths of a second turned into `11d 18h` |
+| `status` | IF-MIB operational status name, `Up (1)` |
+| `connections`, `errors`, `allocation_units` | Plain number |
+
+Anything else is shown as a number rounded to two decimals.
+
+Example of an indexed metric with instance discovery:
+
 ```json
 {
-    "name": "Custom Temp",
+    "name": "Cisco Temperature",
     "oid_template": "1.3.6.1.4.1.9.9.13.1.3.1.3.{index}",
+    "instance_oid": "1.3.6.1.4.1.9.9.13.1.3.1.2",
     "metric_type": "gauge",
     "unit": "celsius",
     "category": "environment",
@@ -243,39 +317,47 @@ Example:
 }
 ```
 
-### Node States
-| State | Meaning |
+To see what a device exposes before writing a definition, walk it from a shell: `snmpwalk -v2c -c <community> <ip> 1.3.6.1.4.1.2021` for the Net-SNMP tree, or `1.3.6.1.2.1.25` for HOST-RESOURCES.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
 |---|---|
-| UP | Reachable, all metrics within thresholds |
-| DEGRADED | Reachable, at least one metric in WARNING or CRITICAL |
-| PENDING | A reachability check failed, retrying at 1/3 of the interval |
-| DOWN | Retries exhausted |
-| PAUSED | Node or group disabled |
+| No **Probe device** button | SNMP is off for that node. Enable it under **Configuration → Nodes**. The screen now says so. |
+| Metrics show `-` on the dashboard | Usually SNMP off on a node that still has metrics configured; an amber banner names it. Otherwise the device stopped answering that OID, so re-probe. |
+| A metric was configured but shows nothing after a probe | It is listed under *Not supported by this device*. The device does not implement that OID. |
+| Group SNMP settings reset on restart | Fixed in v1.1.0. Re-enter them once. |
+| Container build fails, no space left | `docker builder prune -f`, then grow the disk with `pct resize <vmid> rootfs +4G`. |
+| `config.json` is a directory | It did not exist at first start. Stop the stack, remove the directory, copy `config.json.example`, start again. |
+| Version in the About card is stale | The version is baked in at build time. Rebuild with `--build` and hard-refresh the browser. |
+| Alerts flap on latency spikes | Raise **Samples** to 2 or 3 for that metric. |
 
-### Notifications
-Two channels, both driven from the "Settings" tab:
-- **Pushover**: User Key and API Token, priority -2 (Lowest) to 2 (Emergency, with retry every 60 s for 1 h). Per-node priority overrides the global value.
-- **Webhook**: JSON POST to any URL. Payload fields: `source`, `event` (`node_down`, `node_up`, `metric_warning`, `metric_critical`, `metric_resolved`, `alert_storm`), `title`, `message`, `priority`, `timestamp`, plus `node`, `ip`, `group`, `status` or metric details.
-- **Recovery messages**: When a DOWN node is reachable again, a message with the downtime is sent. Disable under Settings if you only want failures.
-- **Maintenance Mode**: Suppresses every channel.
-- **Smart Throttling**: If more than **X** nodes fail within **Y** seconds, individual alerts pause and one summary is sent.
-- **Dependencies**: Set "Depends on" for a node. A DOWN parent suppresses the child's DOWN alert and its recovery message.
+## API
 
-### Metric Alerts
-Per metric: condition (above/below), warning and critical thresholds, and **Samples**, the number of consecutive breaching samples before the alert raises. Recovery is immediate with a 5 % hysteresis band. Existing metrics keep 1 sample; set 2 or 3 on noisy metrics such as ICMP latency.
+Interactive docs at `/docs`. The endpoints most useful outside the UI:
 
-### Heartbeat
-Enable under Settings with a ping URL (Healthchecks.io, Uptime Kuma push, Home Assistant webhook). BeamState sends a GET on the configured interval. The receiving service alerts you when the pings stop.
+| Endpoint | Purpose |
+|---|---|
+| `GET /status` | Every node's latest result |
+| `GET /status/stream` | Server-sent events, one message per check |
+| `GET /config/export`, `POST /config/import` | Move a topology between installs |
+| `POST /metrics/probe/{node_id}` | Probe a device's capabilities |
+| `GET /metrics/capabilities/{node_id}` | Stored probe result |
+| `GET /metrics/current`, `GET /metrics/history` | Live values and bucketed history |
+| `GET /trace/events`, `GET /trace/availability` | State history and uptime statistics |
+| `GET /trace/stream` | Server-sent events for state changes |
+| `POST /discovery/scan`, `POST /discovery/import` | Subnet discovery |
 
-### State History
-Every status transition is written to the `state_events` table and served by `GET /trace/events?limit=&node_id=&hours=`. Retention in days is set under Settings (0 keeps everything).
+## Documentation
+
+- [**Grafana Guide**](GRAFANA_GUIDE.md): dashboards and alerts on the InfluxDB data.
 
 ## Tech Stack
 
 - **Backend**: Python 3.11+, FastAPI, SQLAlchemy, pysnmp 7, ping3.
 - **Frontend**: React, Vite, Tailwind CSS, Lucide Icons.
-- **Database**: SQLite (`backend/data/beamstate.db`, override with the `DB_PATH` environment variable).
-- **CI**: GitHub Actions runs the backend tests, frontend lint and build, and both Docker builds on every push and merge request.
+- **Database**: SQLite at `backend/data/beamstate.db`, override with the `DB_PATH` environment variable.
+- **CI**: GitHub Actions runs the backend tests, frontend lint and build, and both Docker builds on every push and pull request.
 
 ## Development
 
@@ -291,68 +373,50 @@ cd frontend && npm run lint && npm run build
 ```
 BeamState/
 ├── backend/
-│   ├── main.py             # App entry point, SSE status stream
-│   ├── monitor_manager.py  # Node state machine, alerts, reboot detection, heartbeat
-│   ├── metrics_processor.py# Thresholds, sample counting, metric history
-│   ├── notifications.py    # Pushover, webhook, Notifier facade
-│   ├── availability.py     # Uptime statistics from state history
-│   ├── cleanup.py          # Import policy and config.json import
-│   ├── utils.py            # Export to config.json
-│   ├── snmp.json           # Default SNMP metric definitions
-│   ├── config.json         # Export of the database + app settings (gitignored)
-│   ├── monitors/           # Ping, SNMP health check, SNMP collector
-│   ├── routers/            # API endpoints
-│   ├── migrations/         # Schema updates applied at startup
-│   ├── tests/              # pytest suite
-│   └── data/               # SQLite DB, alert state, logs (bind-mounted)
-├── frontend/
-│   ├── src/components/     # React components
-│   └── public/             # Assets
-├── .github/workflows/      # CI
+│   ├── main.py              # App entry point, SSE status stream, retention loop
+│   ├── monitor_manager.py   # Node state machine, alerts, reboot detection, heartbeat
+│   ├── metrics_processor.py # Thresholds, sample counting, rates, metric history
+│   ├── capability_probe.py  # Asks a device what it supports
+│   ├── availability.py      # Uptime statistics from state history
+│   ├── notifications.py     # Pushover, webhook, Notifier facade
+│   ├── trace_manager.py     # State events, ring buffer and persistence
+│   ├── discovery_engine.py  # Subnet scanning
+│   ├── cleanup.py           # Import policy and config.json import
+│   ├── utils.py             # Export to config.json
+│   ├── storage.py           # App config, InfluxDB, monitoring data log
+│   ├── snmp.json            # Metric definitions
+│   ├── config.json          # Export of the database plus settings (gitignored)
+│   ├── monitors/            # Ping, SNMP health check, SNMP collector
+│   ├── routers/             # API endpoints
+│   ├── migrations/          # Schema updates applied at startup
+│   ├── tests/               # pytest suite
+│   └── data/                # SQLite DB, alert state, logs (bind-mounted)
+├── frontend/src/components/ # Dashboard, Metrics, Trace, Discovery, Config
+├── .github/workflows/       # CI
 ├── docker-compose.yml
-└── start-app.ps1           # Local dev startup (Windows)
+└── start-app.ps1            # Local dev startup (Windows)
 ```
 
-## Recent Improvements
-
-### ✅ Completed
-- **Database as source of truth** - config.json is an export with metric configuration; import/export endpoints; startup import policy.
-- **DEGRADED state, sample counting, recovery and reboot notifications, parent dependencies, webhook channel, heartbeat.**
-- **State history and availability** - Persisted transitions, uptime % per node, reliability table.
-- **Metric history and sparklines** - Short-term SQLite samples behind the Metrics page.
-- **Live dashboard over SSE** - One push per check instead of polling.
-- **pysnmp 7 migration and dependency fixes** - Builds again with pyasn1 0.6 and starlette 1.x.
-- **Per-Node Alert Priority** - Override global notification priority on individual nodes.
-- **Security Hardening** - Fixed secret leakage in API responses, dependency CVE patches.
-- **Enhanced Discovery UI** - Visual protocol badges and strict import filters based on scan settings.
-- **InfluxDB Integration** - Full support for time-series data storage with UI configuration.
-- **Configurable Logging** - File logging with retention policy, separate system and runtime logs.
-- **Pushover Notifications** - Configurable push alerts for node DOWN events with priority and custom templates.
-
 ## Roadmap
-
-### Configuration UI
-- [ ] **Max Retries Config** - Expose `max_retries` setting in UI (currently only in config.json)
-- [ ] **Timeout Config** - Expose ping/SNMP timeout settings in UI (currently hardcoded to 5s)
-- [ ] **SNMP Version Config** - Expose SNMP version setting in UI (currently v2c only)
-
-### Dashboard
-- [ ] **Collapseable groups** - Add collapseable groups in dashboard
-- [ ] **Drag and drop nodes** - Add drag and drop functionality to move nodes in a group
-
-### Notifications
-- [x] **Pushover Support** - Add Pushover integration for push notifications on node status changes
-- [x] **Smart Throttling** - Prevent alert spam during mass outages
-- [x] **Webhook channel, recovery messages, parent dependencies, heartbeat**
-- [ ] **Scheduled maintenance windows** - Per-group windows with start and end time
 
 ### Coverage
 - [ ] **Service checks** - TCP port, HTTP status and DNS monitors next to ICMP and SNMP
 - [ ] **API authentication** - Required before exposing the UI outside the LAN
+- [ ] **SNMPv3** - Community strings travel in clear text today
 
-### UI/UX Improvements
-- [ ] **Mobile Config Layout** - Fix node configuration table wrapping on mobile devices (too small)
-- [ ] **Auto-fill Group Interval** - When selecting a group in node config, auto-populate the group's default interval
+### Notifications
+- [ ] **Scheduled maintenance windows** - Per-group windows with a start and end time
+
+### Configuration UI
+- [ ] **Max retries and timeouts** - Expose in the UI; timeouts are fixed at 5 s today
+- [ ] **Interface operational status alerts** - Alert on an up-to-down change by name instead of a numeric threshold
+
+### Dashboard
+- [ ] **Collapsible groups**
+- [ ] **Drag and drop nodes between groups**
+- [ ] **Mobile config layout** - The node table wraps badly on small screens
+
+Release notes for what has already shipped are on the [releases page](https://github.com/straybiker/BeamState/releases).
 
 ## License
 
