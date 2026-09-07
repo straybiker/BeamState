@@ -74,9 +74,28 @@ class MetricDefinitionDB(Base):
     device_type = Column(String, nullable=True)  # "unifi_switch", "unifi_ap", "generic"
     metric_source = Column(String, default="snmp") # "snmp", "icmp", "agent"
     requires_index = Column(Boolean, default=False)  # True if OID needs interface index
+    # Name column that labels this metric's instances (e.g. ifDescr for interfaces,
+    # lmTempSensorsDevice for sensors). Walked during a device probe.
+    instance_oid = Column(String, nullable=True)
     enabled = Column(Boolean, default=True)
-    
+
     node_metrics = relationship("NodeMetricDB", back_populates="metric_definition")
+
+
+class NodeCapabilityDB(Base):
+    """
+    Result of probing a node: which metric definitions it answers, and for
+    indexed metrics, which instances exist and what they are called.
+    """
+    __tablename__ = "node_capabilities"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    node_id = Column(String, ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
+    metric_definition_id = Column(String, ForeignKey("metric_definitions.id"), index=True)
+    instance_index = Column(Integer, nullable=True)   # None for scalar metrics
+    instance_label = Column(String, nullable=True)    # e.g. "temp-cpu", "eth0", "/var"
+    supported = Column(Boolean, default=False)
+    sample_value = Column(String, nullable=True)      # Raw value seen while probing
+    probed_at = Column(Float, nullable=True)
 
 class NodeMetricDB(Base):
     __tablename__ = "node_metrics"
@@ -204,6 +223,7 @@ class MetricDefinitionBase(BaseModel):
     device_type: Optional[str] = None
     metric_source: Optional[str] = "snmp"
     requires_index: bool = False
+    instance_oid: Optional[str] = None
     enabled: bool = True
 
 class MetricDefinitionCreate(MetricDefinitionBase):
@@ -257,3 +277,15 @@ class NodeInterface(NodeInterfaceBase):
     id: str
     class Config:
         from_attributes = True
+
+class NodeCapability(BaseModel):
+    metric_definition_id: str
+    metric_name: str
+    category: Optional[str] = None
+    unit: Optional[str] = None
+    requires_index: bool = False
+    instance_index: Optional[int] = None
+    instance_label: Optional[str] = None
+    supported: bool = False
+    sample_value: Optional[str] = None
+    probed_at: Optional[float] = None

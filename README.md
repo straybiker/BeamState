@@ -200,6 +200,36 @@ Default SNMP metric definitions are stored in `backend/snmp.json`. You can add c
 - **oid_template**: Use `{index}` placeholder for interface metrics.
 - **requires_index**: Set to `true` if the user needs to specify an index (e.g., Interface ID) or `false` for scalar values (like System Uptime).
 
+#### Probe device
+There is no single set of system OIDs that works everywhere, so BeamState asks each device instead of guessing. In **Configuration → Metrics**, pick a node and press **Probe device**:
+
+- Every scalar metric is tested in one multi-varbind SNMP GET. Anything the device answers is supported.
+- Every indexed metric has its instance name column walked, so sensors, disks, storage and interfaces arrive **named**. You tick "temp-cpu", not index 4.
+- The result is stored per node. The configuration screen then lists only the supported metrics and collapses the rest behind *Not supported by this device*, which stays expandable in case a firmware update adds an OID.
+- **Enable all** switches on every supported scalar system metric in one click.
+
+Probing is cheap: about 0.1 to 0.7 seconds for UniFi hardware. Re-probe after a firmware update or when you add an interface. A node that has never been probed shows every metric, exactly as before.
+
+The result also exposes the current reading next to each metric, which makes it obvious whether a sensor is live or reporting zero.
+
+#### Which system metrics work on which device
+For reference, this is what probing found across one home lab. Interface metrics come from the standard IF-MIB and work everywhere; system metrics do not:
+
+| Device family | System metrics that work | Source MIB |
+|---|---|---|
+| UDM / UDM Pro, and any Net-SNMP Linux host (Pi-hole, NAS, Proxmox) | `Linux Load (1m/5m/15m)`, `CPU Idle/User/System (Net-SNMP)`, `Linux Mem Total/Available/Buffers/Cached`, `Linux Swap Total/Available`, `Sensor Temperature`, `TCP Connections`, `System Uptime` | UCD-SNMP-MIB (1.3.6.1.4.1.2021), temperature from its lm-sensors table |
+| UniFi switches and access points (USW, UAP) | `CPU (UniFi)`, `Linux Load (1m/5m/15m)`, `Linux Mem Total/Available` | HOST-RESOURCES + partial UCD |
+| EdgeSwitch | `Temperature`, `CPU Load (%)` | Broadcom (1.3.6.1.4.1.4413) |
+| Windows, printers, generic hosts | `CPU Utilization`, `Storage Used`, `System Uptime` | HOST-RESOURCES-MIB (1.3.6.1.2.1.25) |
+
+Notes:
+- **The UDM Pro reports no CPU percentage.** Use `CPU Idle (Net-SNMP)` with the alert condition set to **below** (for example warn under 30 % idle), or add `CPU User` and `CPU System`. `CPU Utilization` and `CPU (UniFi)` both return "no such object" on the UDM Pro.
+- **A custom OID needs one extra field to be discoverable.** For an indexed metric, set `instance_oid` to the table column that holds the instance names (`1.3.6.1.2.1.2.2.1.2` for interfaces, `1.3.6.1.4.1.2021.13.16.2.1.2` for lm-sensors). Probing walks that column to offer named instances. Without it the metric still works, but you must enter the index by hand.
+- **Temperature lives in a different place on every family.** The EdgeSwitch uses the Broadcom `Temperature` OID. Net-SNMP hosts including the UDM Pro use `Sensor Temperature`, which reads the lm-sensors table and needs a sensor index. Find the indices for a device with `snmpwalk -v2c -c <community> <ip> 1.3.6.1.4.1.2021.13.16.2.1.2`; on a UDM Pro these are typically 1 `temp-CPU`, 2 `temp-Local`, 3 `temp-PHY` and 4 `temp-cpu` (the hottest, the SoC package). Sensors reading 0 are unused.
+- **The UDM Pro reports no disk usage.** It exposes neither `hrStorage` nor `dskTable`, so `Disk Used (%)` and `Storage Used` stay empty there. Both work on Net-SNMP hosts where `disk` is configured in `snmpd.conf`.
+- A metric that returns nothing logs an SNMP warning and simply shows no value. Nothing breaks, but it is worth unchecking so the collector stops polling it.
+- To see what a device actually supports, walk it from the host: `snmpwalk -v2c -c <community> <ip> 1.3.6.1.4.1.2021` for the Net-SNMP tree.
+
 Example:
 ```json
 {
