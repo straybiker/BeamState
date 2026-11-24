@@ -7,6 +7,7 @@ import pathlib
 from datetime import datetime
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import ASYNCHRONOUS
+from pause import DEFAULT_PRESETS, sanitize_pause_config
 
 logger = logging.getLogger("BeamState.Storage")
 
@@ -60,7 +61,8 @@ class Storage:
             "history": {
                 "retention_days": 90,
                 "metric_retention_days": 3
-            }
+            },
+            "pause": {"presets": [dict(p) for p in DEFAULT_PRESETS]}
         }
         
         try:
@@ -74,6 +76,9 @@ class Storage:
                         for section in self.config:
                             if isinstance(app_config.get(section), dict):
                                 self.config[section].update(app_config[section])
+                        # Replace, not merge: a list cannot be merged key by key
+                        if "pause" in app_config:
+                            self.config["pause"] = sanitize_pause_config(app_config["pause"])
                             
             # Setup InfluxDB
             influx_conf = self.config["influxdb"]

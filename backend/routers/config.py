@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from database import get_db
 from models import Group, GroupCreate, GroupDB, Node, NodeCreate, NodeDB
+from pause import compute_paused_until
 from utils import save_config
 from broadcast import status_stream
+import time
 import uuid
 
 
@@ -158,6 +161,8 @@ def create_node(node: NodeCreate, db: Session = Depends(get_db)):
 
     _validate_parent(db, None, node.parent_id)
     new_node = NodeDB(**node.model_dump())
+    if new_node.enabled:
+        new_node.paused_until = None
     db.add(new_node)
     db.commit()
     db.refresh(new_node)
@@ -174,33 +179,94 @@ def update_node(node_id: str, node: NodeCreate, request: Request, db: Session = 
     if not db_node:
         raise HTTPException(status_code=404, detail="Node not found")
     
-    # Check if node is being unpaused (enabled: false -> true)
     was_paused = db_node.enabled == False
-    will_be_enabled = node.enabled == True
 
     _validate_parent(db, node_id, node.parent_id)
-    for key, value in node.model_dump().items():
+    data = node.model_dump()
+    # A client that does not send the pause state (the edit form) must not change it
+    for field in ("enabled", "paused_until"):
+        if field not in node.model_fields_set:
+            data.pop(field)
+    for key, value in data.items():
         setattr(db_node, key, value)
-    
+    if db_node.enabled:
+        db_node.paused_until = None
+
+    _commit_node(db, db_node)
+    _apply_pause_transition(request, db, db_node, was_paused)
+    return db_node
+
+
+class PauseRequest(BaseModel):
+    value: Optional[int] = None
+    unit: Optional[str] = None
+    indefinite: bool = False
+
+
+def _commit_node(db: Session, db_node: NodeDB):
     db.commit()
     db.refresh(db_node)
-    
-    # Sync to config.json
     save_config(db)
     _config_changed()
-    
-    # Trigger immediate check if node was just unpaused
-    # Trigger immediate check (unpause) or set status (pause)
-    if hasattr(request.app.state, "pinger"):
-        if was_paused and will_be_enabled:
-            request.app.state.pinger.trigger_immediate_check(node_id)
-            logger.info(f"Node {db_node.name} unpaused - triggering immediate check")
-        elif not will_be_enabled and (not was_paused):
-            # Ensure group is loaded
-            if not db_node.group:
-                 db_node.group = db.query(GroupDB).filter(GroupDB.id == db_node.group_id).first()
-            request.app.state.pinger.set_paused(db_node)
-    
+
+
+def _apply_pause_transition(request: Request, db: Session, db_node: NodeDB, was_paused: bool):
+    """Update the monitor cache when a node changes between paused and active."""
+    pinger = getattr(request.app.state, "pinger", None)
+    if pinger is None:
+        return
+    if was_paused and db_node.enabled:
+        pinger.trigger_immediate_check(str(db_node.id))
+        logger.info(f"Node {db_node.name} resumed - triggering immediate check")
+    elif not was_paused and not db_node.enabled:
+        if not db_node.group:
+            db_node.group = db.query(GroupDB).filter(GroupDB.id == db_node.group_id).first()
+        pinger.set_paused(db_node)
+
+
+@router.post("/nodes/{node_id}/pause", response_model=Node)
+def pause_node(node_id: str, body: PauseRequest, request: Request, db: Session = Depends(get_db)):
+    """
+    Pause monitoring of a node. With value + unit (minutes, hours, days, months)
+    monitoring resumes automatically; with indefinite=true it stays paused until
+    resumed. Pausing an already paused node replaces its timer.
+    """
+    db_node = db.query(NodeDB).filter(NodeDB.id == node_id).first()
+    if not db_node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    if body.indefinite:
+        paused_until = None
+    else:
+        try:
+            paused_until = compute_paused_until(body.value, body.unit, time.time())
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    was_paused = db_node.enabled == False
+    db_node.enabled = False
+    db_node.paused_until = paused_until
+    _commit_node(db, db_node)
+    _apply_pause_transition(request, db, db_node, was_paused)
+
+    unit = body.unit[:-1] if body.value == 1 else body.unit
+    until = "until resumed" if paused_until is None else f"for {body.value} {unit}"
+    logger.info(f"Node {db_node.name} paused {until}")
+    return db_node
+
+
+@router.post("/nodes/{node_id}/resume", response_model=Node)
+def resume_node(node_id: str, request: Request, db: Session = Depends(get_db)):
+    """Resume monitoring of a paused node now and drop any timer."""
+    db_node = db.query(NodeDB).filter(NodeDB.id == node_id).first()
+    if not db_node:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    was_paused = db_node.enabled == False
+    db_node.enabled = True
+    db_node.paused_until = None
+    _commit_node(db, db_node)
+    _apply_pause_transition(request, db, db_node, was_paused)
     return db_node
 
 

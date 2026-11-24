@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import api from '../api';
 import { Plus, Trash2, ArrowUpDown, Play, Pause } from 'lucide-react';
 import toast from 'react-hot-toast';
 import MetricsConfig from './MetricsConfig';
 import AppConfig from './AppConfig';
+import PauseMenu from './PauseMenu';
+import { pausePresets, formatDuration, formatPausedUntil } from '../pause';
 
 const Config = () => {
     const [groups, setGroups] = useState([]);
@@ -246,17 +248,61 @@ const Config = () => {
         }
     };
 
-    const handleToggleNode = async (node) => {
-        try {
-            const newEnabled = node.enabled === false ? true : false;
-            await api.put(`/config/nodes/${node.id}`, { ...node, enabled: newEnabled });
-            toast.success(`Node ${newEnabled ? 'started' : 'paused'}`);
-            fetchData();
-        } catch (e) {
-            console.error(e);
-            toast.error("Failed to update node status");
+    // Pause menu: { nodeId, anchor } while open
+    const [pauseMenu, setPauseMenu] = useState(null);
+    const closePauseMenu = useCallback(() => setPauseMenu(null), []);
+
+    const handleNodePauseButton = (e, node) => {
+        e.stopPropagation();
+        if (node.enabled === false) {
+            resumeNode(node);
+        } else if (pauseMenu?.nodeId === node.id) {
+            setPauseMenu(null);
+        } else {
+            setPauseMenu({ nodeId: node.id, anchor: e.currentTarget });
         }
     };
+
+    const pauseNode = async (node, body) => {
+        setPauseMenu(null);
+        try {
+            await api.post(`/config/nodes/${node.id}/pause`, body);
+            toast.success(body.indefinite
+                ? `${node.name} paused until resumed`
+                : `${node.name} paused for ${formatDuration(body.value, body.unit)}`);
+            fetchData();
+        } catch (err) {
+            console.error(err);
+            toast.error(err.response?.data?.detail && typeof err.response.data.detail === 'string'
+                ? err.response.data.detail
+                : "Failed to pause node");
+        }
+    };
+
+    const resumeNode = async (node) => {
+        try {
+            await api.post(`/config/nodes/${node.id}/resume`);
+            toast.success(`${node.name} resumed`);
+            fetchData();
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to resume node");
+        }
+    };
+
+    // The backend resumes expired pauses itself; refetch when the nearest one ends
+    useEffect(() => {
+        const ends = nodes
+            .filter(n => n.enabled === false && n.paused_until)
+            .map(n => n.paused_until * 1000);
+        if (ends.length === 0) return undefined;
+        // Two seconds of slack lets the monitor loop (1 s cadence) act first.
+        // Cap the wait: setTimeout overflows past ~24.8 days.
+        const delay = Math.min(Math.max(Math.min(...ends) - Date.now(), 0) + 2000, 2 ** 31 - 1);
+        const timer = setTimeout(fetchData, delay);
+        return () => clearTimeout(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [nodes]);
 
     // Sorting Logic
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
@@ -712,7 +758,14 @@ const Config = () => {
                                                 : 'hover:bg-slate-800/30'
                                                 }`}
                                         >
-                                            <td className="px-4 py-3 font-medium">{n.name}</td>
+                                            <td className="px-4 py-3 font-medium">
+                                                {n.name}
+                                                {n.enabled === false && (
+                                                    <div className="text-xs font-normal text-orange-300/80">
+                                                        {n.paused_until ? `Paused until ${formatPausedUntil(n.paused_until)}` : 'Paused until resumed'}
+                                                    </div>
+                                                )}
+                                            </td>
                                             <td className="px-4 py-3 text-slate-400">{n.ip}</td>
                                             <td className="px-4 py-3"><span className="bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded-full">{group ? group.name : 'Unknown'}</span></td>
                                             <td className="px-4 py-3 text-slate-400">
@@ -749,9 +802,23 @@ const Config = () => {
                                             </td>
                                             <td className="px-4 py-3 text-right">
                                                 <div className="flex items-center justify-end gap-2">
-                                                    <button onClick={() => handleToggleNode(n)} className="bg-slate-700/50 hover:bg-slate-700 p-1 rounded transition-colors" title={n.enabled === false ? "Start Node" : "Pause Node"}>
+                                                    <button
+                                                        onClick={(e) => handleNodePauseButton(e, n)}
+                                                        className={`p-1 rounded transition-colors ${pauseMenu?.nodeId === n.id ? 'bg-slate-600' : 'bg-slate-700/50 hover:bg-slate-700'}`}
+                                                        title={n.enabled === false ? "Resume Node" : "Pause Node"}
+                                                        aria-haspopup={n.enabled === false ? undefined : 'dialog'}
+                                                        aria-expanded={n.enabled === false ? undefined : pauseMenu?.nodeId === n.id}
+                                                    >
                                                         {n.enabled === false ? <Play size={18} className="text-green-400" /> : <Pause size={18} className="text-orange-400" />}
                                                     </button>
+                                                    {pauseMenu?.nodeId === n.id && (
+                                                        <PauseMenu
+                                                            anchor={pauseMenu.anchor}
+                                                            presets={pausePresets(appConfig)}
+                                                            onPause={(body) => pauseNode(n, body)}
+                                                            onClose={closePauseMenu}
+                                                        />
+                                                    )}
                                                     <button onClick={() => handleDeleteNode(n.id)} className={`${deleteConfirm.type === 'node' && deleteConfirm.id === n.id ? 'bg-red-600 text-white px-2' : 'text-red-400 hover:text-red-300 p-1'} rounded transition-all flex items-center justify-center`}>
                                                         {deleteConfirm.type === 'node' && deleteConfirm.id === n.id ? <span className="text-xs font-bold">Confirm</span> : <Trash2 size={18} />}
                                                     </button>
@@ -772,7 +839,7 @@ const Config = () => {
             )}
 
             {activeTab === 'settings' && (
-                <AppConfig />
+                <AppConfig onSaved={setAppConfig} />
             )}
         </div>
     );

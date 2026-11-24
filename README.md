@@ -19,6 +19,7 @@ It asks each device what it can actually report rather than assuming, which matt
 - **Metric history**: Short-term samples in SQLite drive sparklines on the Metrics page. Optional InfluxDB for long-term trends and Grafana.
 - **Live dashboard**: Server-sent events push each completed check, with polling as a fallback.
 - **Network discovery**: Scan a subnet for ICMP and SNMP devices and import them into a group.
+- **Timed pause**: Pause a node for a set number of minutes, hours, days or months, and monitoring resumes by itself. Settings holds the list of periods the pause button offers. A pause can also stay in place until you resume the node.
 - **Heartbeat**: Deadman ping to Healthchecks.io, Uptime Kuma or Home Assistant, so you notice when BeamState itself stops.
 - **Backup by design**: SQLite is the source of truth; `config.json` is a continuously rewritten export you can copy to another host.
 
@@ -168,7 +169,7 @@ Per node you can set the interval, packet count, retry limit, protocols, SNMP co
 | DEGRADED | Reachable, at least one metric in WARNING or CRITICAL |
 | PENDING | A reachability check failed, retrying at one third of the interval |
 | DOWN | Retries exhausted |
-| PAUSED | Node or group disabled |
+| PAUSED | Node or group disabled, for a set time or until resumed |
 
 A node is reachable only when **all** its configured protocols succeed. Metric alerts can never make a node DOWN, only DEGRADED, so DOWN unambiguously means unreachable.
 

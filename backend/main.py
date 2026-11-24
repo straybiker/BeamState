@@ -66,6 +66,8 @@ async def lifespan(app: FastAPI):
         run_migrations_v3()
         from migrations.schema_update_v4 import run_migrations as run_migrations_v4
         run_migrations_v4()
+        from migrations.schema_update_v5 import run_migrations as run_migrations_v5
+        run_migrations_v5()
     except Exception as e:
         logger.warning(f"Database migration failed: {e}")
 

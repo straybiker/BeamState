@@ -43,6 +43,8 @@ class NodeDB(Base):
     packet_count = Column(Integer, nullable=True)
     max_retries = Column(Integer, nullable=True)
     enabled = Column(Boolean, default=True)
+    # Epoch seconds at which a timed pause ends. None = paused until manually resumed.
+    paused_until = Column(Float, nullable=True)
     
     # Monitoring protocol overrides
     monitor_ping = Column(Boolean, nullable=True)
@@ -163,6 +165,7 @@ class NodeBase(BaseModel):
     packet_count: Optional[int] = None
     max_retries: Optional[int] = None
     enabled: bool = True
+    paused_until: Optional[float] = None  # Epoch seconds; set by a timed pause
     monitor_ping: Optional[bool] = None
     monitor_snmp: Optional[bool] = None
     snmp_community: Optional[str] = None
