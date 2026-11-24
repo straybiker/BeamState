@@ -72,6 +72,7 @@ def build_export(db: Session, app_config: dict | None = None) -> dict:
                 "packet_count": node.packet_count,
                 "max_retries": node.max_retries,
                 "enabled": node.enabled,
+                "paused_until": node.paused_until,
                 "monitor_ping": node.monitor_ping,
                 "monitor_snmp": node.monitor_snmp,
                 "snmp_community": node.snmp_community,
@@ -134,6 +135,10 @@ def save_app_config(app_config: dict):
                 except (ValueError, TypeError):
                     logger.warning("Invalid alert_window, defaulting to 60")
                     p_config["alert_window"] = 60
+
+        if "pause" in app_config:
+            from pause import sanitize_pause_config
+            app_config["pause"] = sanitize_pause_config(app_config["pause"])
 
         with open(CONFIG_PATH, "r") as f:
             data = json.load(f)

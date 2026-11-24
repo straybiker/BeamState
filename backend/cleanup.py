@@ -129,6 +129,8 @@ def import_config(db: Session, config_data: dict, replace_metrics: bool = True) 
             node.max_retries = n_data.get("max_retries")
             node.notification_priority = n_data.get("notification_priority")
             node.enabled = n_data.get("enabled", True)
+            # A timed pause only applies to a paused node
+            node.paused_until = None if node.enabled else n_data.get("paused_until")
             node.monitor_ping = n_data.get("monitor_ping")
             node.monitor_snmp = n_data.get("monitor_snmp")
             node.snmp_community = n_data.get("snmp_community")

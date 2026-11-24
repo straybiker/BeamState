@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { Save, RefreshCw, Database, FileText, Bell, Info, Github, Webhook, HeartPulse } from 'lucide-react';
+import { Save, RefreshCw, Database, FileText, Bell, Info, Github, Webhook, HeartPulse, Timer, Plus, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '../api';
+import { PAUSE_UNITS, MAX_PAUSE_VALUE, MAX_PRESETS, pausePresets, isValidPeriod } from '../pause';
 
-const AppConfig = () => {
+const AppConfig = ({ onSaved }) => {
     const [config, setConfig] = useState(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -27,6 +28,7 @@ const AppConfig = () => {
             if (!data.alerting) data.alerting = { notify_recovery: true, notify_reboot: true };
             if (!data.heartbeat) data.heartbeat = { enabled: false, url: '', interval: 60 };
             if (!data.history) data.history = { retention_days: 90, metric_retention_days: 3 };
+            data.pause = { presets: pausePresets(data) };
             setConfig(data);
         } catch (error) {
             console.error("Failed to load app config:", error);
@@ -37,10 +39,15 @@ const AppConfig = () => {
     };
 
     const handleSave = async () => {
+        if (config.pause?.presets?.some(p => !isValidPeriod(p))) {
+            toast.error("Fix the invalid pause periods before saving");
+            return;
+        }
         try {
             setSaving(true);
             const response = await api.put('/config/app', config);
             setConfig(response.data);
+            onSaved?.(response.data);
             toast.success("Settings saved successfully");
         } catch (error) {
             console.error("Failed to save settings:", error);
@@ -49,6 +56,12 @@ const AppConfig = () => {
             setSaving(false);
         }
     };
+
+    const setPresets = (fn) => setConfig(prev => ({ ...prev, pause: { ...prev.pause, presets: fn(prev.pause.presets) } }));
+    const updatePreset = (index, field, value) =>
+        setPresets(list => list.map((p, i) => (i === index ? { ...p, [field]: value } : p)));
+    const removePreset = (index) => setPresets(list => list.filter((_, i) => i !== index));
+    const addPreset = () => setPresets(list => [...list, { value: 1, unit: 'days' }]);
 
     const handleChange = (section, field, value) => {
         setConfig(prev => ({
@@ -535,6 +548,75 @@ const AppConfig = () => {
                             />
                             <p className="text-xs text-slate-500">BeamState sends a GET request on this interval. Let Healthchecks.io, Uptime Kuma or Home Assistant alert you when it stops.</p>
                         </div>
+                    </div>
+                </div>
+
+                {/* Timed pause */}
+                <div className="bg-surface rounded-xl p-6 border border-slate-700/50">
+                    <div className="flex items-center space-x-3 mb-4">
+                        <div className="p-2 bg-orange-500/20 text-orange-400 rounded-lg">
+                            <Timer size={24} />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold text-white">Pause</h3>
+                            <p className="text-xs text-slate-400">Periods to choose from when you pause a node</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-xs text-slate-400 uppercase font-bold tracking-wider">Periods</label>
+                        {config.pause.presets.map((p, i) => {
+                            const valid = isValidPeriod(p);
+                            return (
+                                <div key={i} className="flex gap-2">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={MAX_PAUSE_VALUE[p.unit]}
+                                        step="1"
+                                        value={p.value}
+                                        onChange={(e) => updatePreset(i, 'value', e.target.value === '' ? '' : Number(e.target.value))}
+                                        aria-label={`Period ${i + 1} duration`}
+                                        className={`w-24 bg-slate-900 border rounded p-2 text-white text-sm focus:border-primary focus:outline-none ${valid ? 'border-slate-700' : 'border-red-500'}`}
+                                    />
+                                    <select
+                                        value={p.unit}
+                                        onChange={(e) => updatePreset(i, 'unit', e.target.value)}
+                                        aria-label={`Period ${i + 1} unit`}
+                                        className="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm focus:border-primary focus:outline-none"
+                                    >
+                                        {PAUSE_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                                    </select>
+                                    <button
+                                        type="button"
+                                        onClick={() => removePreset(i)}
+                                        aria-label={`Remove period ${i + 1}`}
+                                        title="Remove period"
+                                        className="p-2 rounded text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors"
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            );
+                        })}
+                        {config.pause.presets.length < MAX_PRESETS && (
+                            <button
+                                type="button"
+                                onClick={addPreset}
+                                className="flex items-center gap-1 text-sm text-primary hover:text-white transition-colors"
+                            >
+                                <Plus size={14} /> Add period
+                            </button>
+                        )}
+                        {config.pause.presets.some(p => !isValidPeriod(p)) ? (
+                            <p className="text-xs text-red-400">
+                                Each period needs a whole number from 1 to the unit maximum (minutes 525600, hours 8760, days 365, months 12).
+                            </p>
+                        ) : (
+                            <p className="text-xs text-slate-500">
+                                The pause button offers each period, shortest first. Monitoring resumes by itself when the time ends. A custom duration and "until resumed" are always available.
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>

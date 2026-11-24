@@ -103,6 +103,7 @@ class MonitorManager:
             "monitor_snmp": False,
             "failure_count": 0,
             "max_retries": None,
+            "paused_until": node.paused_until,
         }
         # Also clear any failure state so it doesn't resume as PENDING/DOWN later
         state = self.get_node_state(node.id)
@@ -115,6 +116,35 @@ class MonitorManager:
             logger.debug(f"Could not clear metric alerts for paused node {node.name}: {e}")
 
         logger.info(f"Node {node.name} status forced to PAUSED")
+
+    def resume_expired(self, db, now: Optional[float] = None) -> int:
+        """
+        Re-enable nodes whose timed pause has ended. Reads the end time from the
+        database, so a pause that ended while the backend was down resumes on
+        the first loop after start-up.
+        """
+        now = time.time() if now is None else now
+        expired = (
+            db.query(NodeDB)
+            .filter(NodeDB.enabled == False, NodeDB.paused_until.isnot(None), NodeDB.paused_until <= now)  # noqa: E712
+            .all()
+        )
+        if not expired:
+            return 0
+
+        for node in expired:
+            node.enabled = True
+            node.paused_until = None
+        db.commit()
+
+        for node in expired:
+            self.trigger_immediate_check(node.id)
+            logger.info(f"Node {node.name}: timed pause ended, monitoring resumed")
+
+        from utils import save_config
+        save_config(db)
+        status_stream.publish({"type": "config"})
+        return len(expired)
 
     # ------------------------------------------------------------------ #
     # Dependency helpers
@@ -210,6 +240,7 @@ class MonitorManager:
                 "monitor_snmp": False,
                 "failure_count": 0,
                 "max_retries": max_retries,
+                "paused_until": node.paused_until,
             }
             if current_status != "PAUSED":
                 state["status"] = "PAUSED"
@@ -431,6 +462,11 @@ class MonitorManager:
         while self.running:
             db = SessionLocal()
             try:
+                try:
+                    self.resume_expired(db)
+                except Exception as e:
+                    db.rollback()
+                    logger.error(f"Failed to resume expired pauses: {e}")
                 nodes = db.query(NodeDB).all()
                 tasks = [self.process_node_with_limit(n) for n in nodes]
                 if tasks:

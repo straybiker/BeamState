@@ -38,6 +38,14 @@
         },
         "history": {
             "retention_days": 90
+        },
+        "pause": {
+            "presets": [
+                {"value": 30, "unit": "minutes"},
+                {"value": 1, "unit": "hours"},
+                {"value": 1, "unit": "days"},
+                {"value": 1, "unit": "months"}
+            ]
         }
     },
     "groups": [
@@ -64,6 +72,7 @@
             "packet_count": null,
             "max_retries": null,
             "enabled": true,
+            "paused_until": null,
             "monitor_ping": true,
             "monitor_snmp": true,
             "snmp_community": null,

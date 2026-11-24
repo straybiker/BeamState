@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api';
+import { formatPausedUntil } from '../pause';
 import { Wifi, WifiOff, Clock, Activity, PauseCircle, FilterX, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -418,6 +419,11 @@ const Dashboard = () => {
                                                         </span>
                                                     )}
                                                 </div>
+                                                {isPaused && configNode.enabled === false && configNode.paused_until && (
+                                                    <div className="text-xs text-slate-500" title="Monitoring resumes automatically">
+                                                        until {formatPausedUntil(configNode.paused_until)}
+                                                    </div>
+                                                )}
                                                 <div className="text-xs text-slate-500 flex items-center justify-end space-x-1">
                                                     <Activity size={12} />
                                                     <span>{latency ? Math.round(latency) : '-'}ms</span>
